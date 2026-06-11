@@ -40,6 +40,7 @@ class ImageFrame:
     zip_bytes: int
     raw_bytes: int
     raw_data: bytes
+    endpoint: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -71,6 +72,7 @@ def current_image_response(
         return {
             "ok": False,
             "device": {"name": device.name, "ip": device.ip},
+            "endpoints": [endpoint.as_dict() for endpoint in device.endpoint_candidates()],
             "error": "no cached preview image",
             "needs_refresh": True,
         }
@@ -92,6 +94,8 @@ def current_image_response(
         metadata = {
             "ok": True,
             "device": {"name": device.name, "ip": device.ip},
+            "endpoints": [endpoint.as_dict() for endpoint in device.endpoint_candidates()],
+            "endpoint": frame.endpoint,
             "generated_at": generated_at,
             "image": {
                 "width": preview.width,
@@ -139,13 +143,23 @@ def fetch_current_image(device: Device) -> ImageFrame:
     _REQUEST_ID += 1
     request = {"id": _REQUEST_ID, "method": IMAGE_METHOD}
     payload = json.dumps(request, separators=(",", ":")).encode("utf-8") + b"\r\n"
-    with rpc_priority_session(
-        device.ip,
-        port=IMAGE_PORT,
-        priority="image",
-        queue_timeout_seconds=8.0,
-    ):
-        packet = _read_image_packet(device.ip, payload)
+    errors: list[str] = []
+    for endpoint in device.endpoint_candidates():
+        try:
+            with rpc_priority_session(
+                endpoint.ip,
+                port=IMAGE_PORT,
+                priority="image",
+                queue_timeout_seconds=8.0,
+            ):
+                packet = _read_image_packet(endpoint.ip, payload)
+            return _image_frame_from_packet(packet, endpoint.as_dict())
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{endpoint.label} {endpoint.ip}: {exc}")
+    raise TimeoutError(f"ASIAIR image fetch failed for {device.name}; {'; '.join(errors)}")
+
+
+def _image_frame_from_packet(packet: bytes, endpoint: dict[str, Any] | None = None) -> ImageFrame:
     zip_offset = packet.find(b"PK\x03\x04")
     if zip_offset < 0:
         if b"there is no image now" in packet:
@@ -187,6 +201,7 @@ def fetch_current_image(device: Device) -> ImageFrame:
         zip_bytes=len(packet) - zip_offset,
         raw_bytes=len(raw_data),
         raw_data=raw_data,
+        endpoint=endpoint,
     )
 
 
@@ -364,6 +379,7 @@ def _detect_high_byte_offset(raw_data: bytes) -> int:
 def _metadata_response(device: Device, metadata: dict[str, Any], refreshed: bool) -> dict[str, Any]:
     payload = dict(metadata)
     payload["device"] = {"name": device.name, "ip": device.ip}
+    payload["endpoints"] = [endpoint.as_dict() for endpoint in device.endpoint_candidates()]
     payload["refreshed"] = refreshed
     generated_at = payload.get("generated_at")
     payload["age_seconds"] = _age_seconds(generated_at)

@@ -393,6 +393,39 @@ def asiair_rpc(
     raise TimeoutError(f"ASIAIR RPC timeout for {ip}:{port} {method}")
 
 
+def asiair_device_rpc(
+    device: Device,
+    method: str,
+    params: Any | None = None,
+    request_id: int = 1,
+    port: int = IMAGER_PORT,
+    timeout_seconds: float = 5.0,
+    priority: str = "background",
+    queue_timeout_seconds: float | None = None,
+) -> dict[str, Any]:
+    errors: list[str] = []
+    endpoints = device.endpoint_candidates()
+    if _is_write_priority(priority):
+        endpoints = endpoints[:1]
+    for endpoint in endpoints:
+        try:
+            response = asiair_rpc(
+                endpoint.ip,
+                method,
+                params=params,
+                request_id=request_id,
+                port=port,
+                timeout_seconds=timeout_seconds,
+                priority=priority,
+                queue_timeout_seconds=queue_timeout_seconds,
+            )
+            response["_endpoint"] = endpoint.as_dict()
+            return response
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{endpoint.label} {endpoint.ip}: {exc}")
+    raise TimeoutError(f"ASIAIR RPC failed for {device.name}:{port} {method}; {'; '.join(errors)}")
+
+
 def run_probe(
     device: Device,
     methods: tuple[RpcProbeMethod, ...],
@@ -404,8 +437,8 @@ def run_probe(
     for index, method in enumerate(methods, start=1):
         started = time.perf_counter()
         try:
-            response = asiair_rpc(
-                device.ip,
+            response = asiair_device_rpc(
+                device,
                 method.name,
                 params=method.params,
                 request_id=index,
@@ -422,6 +455,7 @@ def run_probe(
                     "ok": code == 0,
                     "code": code,
                     "seconds": round(time.perf_counter() - started, 3),
+                    "endpoint": response.get("_endpoint"),
                     "result": redacted_response.get("result"),
                     "response": redacted_response,
                 }
@@ -442,6 +476,7 @@ def run_probe(
     payload = {
         "device": device.name,
         "ip": device.ip,
+        "endpoints": [endpoint.as_dict() for endpoint in device.endpoint_candidates()],
         "port": port,
         "started_at": started_at,
         "finished_at": datetime.now().isoformat(timespec="seconds"),
@@ -458,10 +493,10 @@ def run_preview_preflight(
     timeout_seconds: float = 5.0,
 ) -> dict[str, Any]:
     started_at = datetime.now().isoformat(timespec="seconds")
-    before_app = asiair_rpc(device.ip, "get_app_state", request_id=1, port=port, timeout_seconds=timeout_seconds)
-    before_camera = asiair_rpc(device.ip, "get_camera_state", request_id=2, port=port, timeout_seconds=timeout_seconds)
-    before_exp = asiair_rpc(
-        device.ip,
+    before_app = asiair_device_rpc(device, "get_app_state", request_id=1, port=port, timeout_seconds=timeout_seconds)
+    before_camera = asiair_device_rpc(device, "get_camera_state", request_id=2, port=port, timeout_seconds=timeout_seconds)
+    before_exp = asiair_device_rpc(
+        device,
         "get_camera_exp_and_bin",
         request_id=3,
         port=port,
@@ -512,18 +547,19 @@ def run_preview_preflight(
             )
         )
 
-        after_app = asiair_rpc(device.ip, "get_app_state", request_id=6, port=port, timeout_seconds=timeout_seconds)
-        after_exp = asiair_rpc(
-            device.ip,
+        after_app = asiair_device_rpc(device, "get_app_state", request_id=6, port=port, timeout_seconds=timeout_seconds)
+        after_exp = asiair_device_rpc(
+            device,
             "get_camera_exp_and_bin",
             request_id=7,
             port=port,
             timeout_seconds=timeout_seconds,
         )
-        after_camera = asiair_rpc(device.ip, "get_camera_state", request_id=8, port=port, timeout_seconds=timeout_seconds)
+        after_camera = asiair_device_rpc(device, "get_camera_state", request_id=8, port=port, timeout_seconds=timeout_seconds)
     payload = {
         "device": device.name,
         "ip": device.ip,
+        "endpoints": [endpoint.as_dict() for endpoint in device.endpoint_candidates()],
         "port": port,
         "started_at": started_at,
         "finished_at": datetime.now().isoformat(timespec="seconds"),
@@ -564,10 +600,10 @@ def run_preview_shot(
 ) -> dict[str, Any]:
     started_at = datetime.now().isoformat(timespec="seconds")
     exposure_us = int(exposure_seconds * 1_000_000)
-    before_app = asiair_rpc(device.ip, "get_app_state", request_id=1, port=port, timeout_seconds=timeout_seconds)
-    before_camera = asiair_rpc(device.ip, "get_camera_state", request_id=2, port=port, timeout_seconds=timeout_seconds)
-    before_exp = asiair_rpc(
-        device.ip,
+    before_app = asiair_device_rpc(device, "get_app_state", request_id=1, port=port, timeout_seconds=timeout_seconds)
+    before_camera = asiair_device_rpc(device, "get_camera_state", request_id=2, port=port, timeout_seconds=timeout_seconds)
+    before_exp = asiair_device_rpc(
+        device,
         "get_camera_exp_and_bin",
         request_id=3,
         port=port,
@@ -587,6 +623,7 @@ def run_preview_shot(
     payload: dict[str, Any] = {
         "device": device.name,
         "ip": device.ip,
+        "endpoints": [endpoint.as_dict() for endpoint in device.endpoint_candidates()],
         "port": port,
         "started_at": started_at,
         "finished_at": datetime.now().isoformat(timespec="seconds"),
@@ -690,10 +727,10 @@ def run_preview_shot(
                     )
                 )
 
-    after_app = asiair_rpc(device.ip, "get_app_state", request_id=request_id + 1, port=port, timeout_seconds=timeout_seconds)
-    after_camera = asiair_rpc(device.ip, "get_camera_state", request_id=request_id + 2, port=port, timeout_seconds=timeout_seconds)
-    after_exp = asiair_rpc(
-        device.ip,
+    after_app = asiair_device_rpc(device, "get_app_state", request_id=request_id + 1, port=port, timeout_seconds=timeout_seconds)
+    after_camera = asiair_device_rpc(device, "get_camera_state", request_id=request_id + 2, port=port, timeout_seconds=timeout_seconds)
+    after_exp = asiair_device_rpc(
+        device,
         "get_camera_exp_and_bin",
         request_id=request_id + 3,
         port=port,
@@ -726,8 +763,8 @@ def build_write_read_plan(
         nonlocal request_id
         started = time.perf_counter()
         try:
-            response = asiair_rpc(
-                device.ip,
+            response = asiair_device_rpc(
+                device,
                 method,
                 params=params,
                 request_id=request_id,
@@ -743,6 +780,7 @@ def build_write_read_plan(
                     "ok": response.get("code") == 0,
                     "code": response.get("code"),
                     "seconds": round(time.perf_counter() - started, 3),
+                    "endpoint": response.get("_endpoint"),
                     "result": redacted.get("result"),
                 }
             )
@@ -885,6 +923,7 @@ def build_write_read_plan(
     return {
         "device": device.name,
         "ip": device.ip,
+        "endpoints": [endpoint.as_dict() for endpoint in device.endpoint_candidates()],
         "port": port,
         "profile": "i-write-read-dry-run",
         "started_at": started_at,
@@ -942,10 +981,10 @@ def _poll_preview_completion(
     deadline = time.monotonic() + wait_timeout_seconds
     request_id = first_request_id
     while time.monotonic() < deadline:
-        app = asiair_rpc(device.ip, "get_app_state", request_id=request_id, port=port, timeout_seconds=timeout_seconds)
+        app = asiair_device_rpc(device, "get_app_state", request_id=request_id, port=port, timeout_seconds=timeout_seconds)
         request_id += 1
-        camera = asiair_rpc(
-            device.ip,
+        camera = asiair_device_rpc(
+            device,
             "get_camera_state",
             request_id=request_id,
             port=port,
@@ -978,13 +1017,14 @@ def _try_rpc_action(
 ) -> dict[str, Any]:
     started = time.perf_counter()
     try:
-        response = asiair_rpc(
-            device.ip,
+        response = asiair_device_rpc(
+            device,
             method,
             params=params,
             request_id=request_id,
             port=port,
             timeout_seconds=timeout_seconds,
+            priority="write",
         )
         return {
             "method": method,
@@ -992,6 +1032,7 @@ def _try_rpc_action(
             "ok": response.get("code") == 0,
             "code": response.get("code"),
             "seconds": round(time.perf_counter() - started, 3),
+            "endpoint": response.get("_endpoint"),
             "response": _redact_sensitive(response),
         }
     except Exception as exc:  # noqa: BLE001

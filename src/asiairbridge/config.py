@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 
 DEFAULT_CONFIG_PATH = Path("config/devices.json")
-WINDOWS_RESERVED_CHARS = re.compile(r'[<>:"/\\|?*]+')
+RESERVED_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*]+')
 
 
 class ConfigError(ValueError):
@@ -16,25 +17,72 @@ class ConfigError(ValueError):
 
 
 @dataclass(frozen=True)
+class DeviceEndpoint:
+    label: str
+    ip: str
+    kind: str | None = None
+    priority: int = 100
+    enabled: bool = True
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "label": self.label,
+            "ip": self.ip,
+            "kind": self.kind,
+            "priority": self.priority,
+            "enabled": self.enabled,
+        }
+
+
+@dataclass(frozen=True)
 class Device:
     name: str
     ip: str
     enabled: bool = True
+    endpoints: tuple[DeviceEndpoint, ...] = ()
     source_roots: tuple["SourceRoot", ...] | None = None
+
+    def endpoint_candidates(self) -> tuple[DeviceEndpoint, ...]:
+        endpoints = [endpoint for endpoint in self.endpoints if endpoint.enabled]
+        if not any(endpoint.ip == self.ip for endpoint in endpoints):
+            endpoints.append(DeviceEndpoint("primary", self.ip, priority=0))
+        endpoints.sort(key=lambda endpoint: (endpoint.priority, endpoint.label, endpoint.ip))
+        return tuple(endpoints)
+
+    def endpoint_ips(self) -> tuple[str, ...]:
+        seen: set[str] = set()
+        ips: list[str] = []
+        for endpoint in self.endpoint_candidates():
+            if endpoint.ip in seen:
+                continue
+            seen.add(endpoint.ip)
+            ips.append(endpoint.ip)
+        return tuple(ips)
+
+    def endpoint_by_ip(self, ip: str) -> DeviceEndpoint | None:
+        for endpoint in self.endpoint_candidates():
+            if endpoint.ip == ip:
+                return endpoint
+        return None
 
 
 @dataclass(frozen=True)
 class SourceRoot:
     label: str
     path_template: str
+    path_templates: dict[str, str] | None = None
     enabled: bool = True
 
     def render(self, device: Device) -> Path:
-        return Path(self.path_template.format(ip=device.ip, name=device.name))
+        return Path(self.render_text(device))
+
+    def render_text(self, device: Device) -> str:
+        template = _platform_value(self.path_templates, self.path_template)
+        return str(template).format(ip=device.ip, name=device.name)
 
     @property
     def safe_label(self) -> str:
-        cleaned = WINDOWS_RESERVED_CHARS.sub("_", self.label).strip(" .")
+        cleaned = RESERVED_FILENAME_CHARS.sub("_", self.label).strip(" .")
         return cleaned or "source"
 
 
@@ -45,7 +93,6 @@ class ProjectSettings:
     logs_dir: Path
     state_dir: Path
     lock_file: Path
-    robocopy_threads: int
     default_device: str | None = None
     private_path_prefixes: tuple[Path, ...] = ()
 
@@ -54,8 +101,6 @@ class ProjectSettings:
 class BackupSettings:
     dry_run_default: bool
     copy_empty_dirs: bool
-    retry_count: int
-    retry_wait_seconds: int
     smb_port: int
     exclude_dirs: tuple[str, ...]
     exclude_files: tuple[str, ...]
@@ -98,12 +143,12 @@ class AppConfig:
         return device.source_roots if device.source_roots is not None else self.backup.source_roots
 
     def display_path(self, value: str | Path) -> str:
-        text = str(value)
+        text = str(value.resolve()) if isinstance(value, Path) else str(value)
         if not text:
             return ""
-        normalized = text.replace("/", "\\")
+        normalized = _normalize_for_compare(text)
         prefixes = sorted(
-            (str(prefix).replace("/", "\\").rstrip("\\") for prefix in self.project.private_path_prefixes),
+            (_normalize_for_compare(str(prefix)) for prefix in self.project.private_path_prefixes),
             key=len,
             reverse=True,
         )
@@ -112,8 +157,8 @@ class AppConfig:
                 continue
             if normalized == prefix:
                 return "..."
-            if normalized.startswith(f"{prefix}\\"):
-                return f"...\\{normalized[len(prefix) + 1:]}"
+            if normalized.startswith(f"{prefix}/"):
+                return f".../{normalized[len(prefix) + 1:]}"
         return text
 
     def logs_path(self) -> Path:
@@ -160,15 +205,14 @@ def load_config(path: str | Path | None = None) -> AppConfig:
 
 def _parse_project(raw: dict[str, Any], root: Path) -> ProjectSettings:
     private_path_prefixes = tuple(
-        _resolve_path(root, item) for item in raw.get("private_path_prefixes", [])
+        _resolve_path(root, _platform_value(item)) for item in raw.get("private_path_prefixes", [])
     )
     return ProjectSettings(
         timezone=str(raw.get("timezone", "Asia/Shanghai")),
-        destination_root=_resolve_path(root, _required(raw, "destination_root")),
-        logs_dir=_resolve_path(root, raw.get("logs_dir", "logs")),
-        state_dir=_resolve_path(root, raw.get("state_dir", "state")),
-        lock_file=_resolve_path(root, raw.get("lock_file", "state/backup.lock")),
-        robocopy_threads=int(raw.get("robocopy_threads", 8)),
+        destination_root=_resolve_path(root, _platform_value(_required(raw, "destination_root"))),
+        logs_dir=_resolve_path(root, _platform_value(raw.get("logs_dir", "logs"))),
+        state_dir=_resolve_path(root, _platform_value(raw.get("state_dir", "state"))),
+        lock_file=_resolve_path(root, _platform_value(raw.get("lock_file", "state/backup.lock"))),
         default_device=str(raw.get("default_device") or "") or None,
         private_path_prefixes=private_path_prefixes,
     )
@@ -182,8 +226,6 @@ def _parse_backup(raw: dict[str, Any]) -> BackupSettings:
     return BackupSettings(
         dry_run_default=bool(raw.get("dry_run_default", True)),
         copy_empty_dirs=bool(raw.get("copy_empty_dirs", True)),
-        retry_count=int(raw.get("retry_count", 2)),
-        retry_wait_seconds=int(raw.get("retry_wait_seconds", 5)),
         smb_port=int(raw.get("smb_port", 445)),
         exclude_dirs=tuple(str(item) for item in raw.get("exclude_dirs", [])),
         exclude_files=tuple(str(item) for item in raw.get("exclude_files", [])),
@@ -195,11 +237,13 @@ def _parse_devices(raw: list[dict[str, Any]]) -> tuple[Device, ...]:
     devices: list[Device] = []
     for item in raw:
         source_roots = item.get("source_roots")
+        ip = str(_required(item, "ip"))
         devices.append(
             Device(
                 name=str(_required(item, "name")),
-                ip=str(_required(item, "ip")),
+                ip=ip,
                 enabled=bool(item.get("enabled", True)),
+                endpoints=_parse_endpoints(item, ip),
                 source_roots=(
                     tuple(_parse_source_root(source) for source in source_roots)
                     if source_roots is not None
@@ -210,10 +254,61 @@ def _parse_devices(raw: list[dict[str, Any]]) -> tuple[Device, ...]:
     return tuple(devices)
 
 
+def _parse_endpoints(raw: dict[str, Any], primary_ip: str) -> tuple[DeviceEndpoint, ...]:
+    endpoint_items = raw.get("endpoints")
+    if endpoint_items is None:
+        endpoint_items = raw.get("ips")
+
+    endpoints: list[DeviceEndpoint] = []
+    if endpoint_items is None:
+        endpoints.append(DeviceEndpoint("primary", primary_ip, priority=0))
+    elif isinstance(endpoint_items, list):
+        for index, item in enumerate(endpoint_items):
+            if isinstance(item, str):
+                endpoints.append(
+                    DeviceEndpoint(
+                        "primary" if item == primary_ip else f"endpoint-{index + 1}",
+                        item,
+                        priority=0 if item == primary_ip else 100 + index,
+                    )
+                )
+            elif isinstance(item, dict):
+                ip = str(_required(item, "ip"))
+                endpoints.append(
+                    DeviceEndpoint(
+                        label=str(item.get("label") or ("primary" if ip == primary_ip else f"endpoint-{index + 1}")),
+                        ip=ip,
+                        kind=str(item.get("kind") or "") or None,
+                        priority=int(item.get("priority", 0 if ip == primary_ip else 100 + index)),
+                        enabled=bool(item.get("enabled", True)),
+                    )
+                )
+            else:
+                raise ConfigError("device.endpoints entries must be strings or objects")
+    else:
+        raise ConfigError("device.endpoints must be a list when provided")
+
+    if not any(endpoint.ip == primary_ip for endpoint in endpoints):
+        endpoints.append(DeviceEndpoint("primary", primary_ip, priority=0))
+
+    deduped: dict[str, DeviceEndpoint] = {}
+    for endpoint in sorted(endpoints, key=lambda item: (item.priority, item.label, item.ip)):
+        deduped.setdefault(endpoint.ip, endpoint)
+    return tuple(deduped.values())
+
+
 def _parse_source_root(raw: dict[str, Any]) -> SourceRoot:
+    path_templates = raw.get("path_templates") or raw.get("path_template_by_platform")
+    if path_templates is not None and not isinstance(path_templates, dict):
+        raise ConfigError("source_root.path_templates must be an object when provided")
     return SourceRoot(
         label=str(_required(raw, "label")),
         path_template=str(_required(raw, "path_template")),
+        path_templates=(
+            {str(key): str(value) for key, value in path_templates.items()}
+            if path_templates is not None
+            else None
+        ),
         enabled=bool(raw.get("enabled", True)),
     )
 
@@ -229,3 +324,32 @@ def _resolve_path(root: Path, value: str | Path) -> Path:
     if path.is_absolute():
         return path
     return (root / path).resolve()
+
+
+def _platform_value(value: Any, default: Any | None = None) -> Any:
+    if value is None:
+        return default
+    if not isinstance(value, dict):
+        return value
+    for key in _platform_keys():
+        if key in value:
+            return value[key]
+    if "default" in value:
+        return value["default"]
+    return default if default is not None else next(iter(value.values()))
+
+
+def _platform_keys() -> tuple[str, ...]:
+    keys: list[str] = []
+    if sys.platform == "darwin":
+        keys.extend(["darwin", "macos", "posix"])
+    elif sys.platform.startswith("linux"):
+        keys.extend(["linux", "posix"])
+    else:
+        keys.extend([sys.platform, "posix"])
+    keys.append("default")
+    return tuple(dict.fromkeys(keys))
+
+
+def _normalize_for_compare(value: str) -> str:
+    return value.replace("\\", "/").rstrip("/")

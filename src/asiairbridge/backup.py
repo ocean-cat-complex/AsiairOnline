@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import fnmatch
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -7,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .config import AppConfig, Device, SourceRoot
-from .probe import tcp_open
+from .probe import ProbeResult, tcp_open
 
 
 @dataclass(frozen=True)
@@ -28,6 +30,20 @@ class BackupResult:
     detail: str
     started_at: str
     finished_at: str
+    copy_backend: str
+
+
+@dataclass(frozen=True)
+class CopyBackend:
+    name: str
+    executable: str | None = None
+
+
+@dataclass(frozen=True)
+class CopyRunResult:
+    ok: bool
+    exit_code: int | None
+    detail: str
 
 
 def build_jobs(
@@ -65,7 +81,7 @@ def build_jobs(
 def run_job(config: AppConfig, job: BackupJob, dry_run: bool) -> BackupResult:
     started_at = datetime.now().isoformat(timespec="seconds")
     port = config.backup.smb_port
-    tcp = tcp_open(job.device.ip, port)
+    tcp = _tcp_open_any(job.device, port)
     if not tcp.ok:
         finished_at = datetime.now().isoformat(timespec="seconds")
         return BackupResult(
@@ -76,39 +92,39 @@ def run_job(config: AppConfig, job: BackupJob, dry_run: bool) -> BackupResult:
             detail=tcp.detail,
             started_at=started_at,
             finished_at=finished_at,
+            copy_backend="none",
         )
 
-    robocopy = shutil.which("robocopy")
-    if not robocopy:
+    backend = _select_copy_backend()
+    if backend is None:
         finished_at = datetime.now().isoformat(timespec="seconds")
         return BackupResult(
             job=job,
             ok=False,
             status="failed",
             exit_code=None,
-            detail="robocopy not found",
+            detail="no supported copy backend found",
             started_at=started_at,
             finished_at=finished_at,
+            copy_backend="none",
         )
 
     job.log_path.parent.mkdir(parents=True, exist_ok=True)
     if not dry_run:
         job.destination_path.mkdir(parents=True, exist_ok=True)
 
-    cmd = _robocopy_command(config, robocopy, job, dry_run)
-    proc = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
+    copy_result = _run_copy_backend(config, backend, job, dry_run)
     finished_at = datetime.now().isoformat(timespec="seconds")
-    ok = proc.returncode < 8
-    detail = _summarize_process(proc)
 
     return BackupResult(
         job=job,
-        ok=ok,
-        status="ok" if ok else "failed",
-        exit_code=proc.returncode,
-        detail=detail,
+        ok=copy_result.ok,
+        status="ok" if copy_result.ok else "failed",
+        exit_code=copy_result.exit_code,
+        detail=copy_result.detail,
         started_at=started_at,
         finished_at=finished_at,
+        copy_backend=backend.name,
     )
 
 
@@ -117,6 +133,7 @@ def result_to_dict(result: BackupResult) -> dict[str, object]:
     return {
         "device": job.device.name,
         "ip": job.device.ip,
+        "endpoints": [endpoint.as_dict() for endpoint in job.device.endpoint_candidates()],
         "source_label": job.source.label,
         "source_path": str(job.source_path),
         "destination_path": str(job.destination_path),
@@ -127,44 +144,115 @@ def result_to_dict(result: BackupResult) -> dict[str, object]:
         "detail": result.detail,
         "started_at": result.started_at,
         "finished_at": result.finished_at,
+        "copy_backend": result.copy_backend,
     }
 
 
-def _robocopy_command(
+def _tcp_open_any(device: Device, port: int) -> ProbeResult:
+    failures: list[str] = []
+    for endpoint in device.endpoint_candidates():
+        result = tcp_open(endpoint.ip, port)
+        if result.ok:
+            return result
+        failures.append(f"{endpoint.label} {endpoint.ip}: {result.detail}")
+
+    return ProbeResult(False, "; ".join(failures))
+
+
+def _select_copy_backend() -> CopyBackend | None:
+    rsync = shutil.which("rsync")
+    if rsync:
+        return CopyBackend("rsync", rsync)
+    return CopyBackend("python")
+
+
+def _run_copy_backend(
     config: AppConfig,
-    robocopy: str,
+    backend: CopyBackend,
+    job: BackupJob,
+    dry_run: bool,
+) -> CopyRunResult:
+    if backend.name == "rsync" and backend.executable:
+        cmd = _rsync_command(config, backend.executable, job, dry_run)
+        proc = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
+        _write_process_log(job.log_path, cmd, proc)
+        return CopyRunResult(proc.returncode == 0, proc.returncode, _summarize_process(proc, "rsync"))
+
+    return _python_copy(config, job, dry_run)
+
+
+def _rsync_command(
+    config: AppConfig,
+    rsync: str,
     job: BackupJob,
     dry_run: bool,
 ) -> list[str]:
     command = [
-        robocopy,
-        str(job.source_path),
-        str(job.destination_path),
-        "/E" if config.backup.copy_empty_dirs else "/S",
-        "/Z",
-        "/FFT",
-        f"/R:{config.backup.retry_count}",
-        f"/W:{config.backup.retry_wait_seconds}",
-        "/XJ",
-        "/COPY:DAT",
-        "/DCOPY:DAT",
-        "/NP",
-        "/TEE",
-        f"/LOG+:{job.log_path}",
-        f"/MT:{config.project.robocopy_threads}",
+        rsync,
+        "-a",
+        "--itemize-changes",
+        "--human-readable",
     ]
     if dry_run:
-        command.append("/L")
-    if config.backup.exclude_dirs:
-        command.append("/XD")
-        command.extend(config.backup.exclude_dirs)
-    if config.backup.exclude_files:
-        command.append("/XF")
-        command.extend(config.backup.exclude_files)
+        command.append("--dry-run")
+    if not config.backup.copy_empty_dirs:
+        command.append("--prune-empty-dirs")
+    for pattern in config.backup.exclude_dirs + config.backup.exclude_files:
+        command.extend(["--exclude", pattern])
+    command.extend([_as_rsync_dir(job.source_path), _as_rsync_dir(job.destination_path)])
     return command
 
 
-def _summarize_process(proc: subprocess.CompletedProcess[str]) -> str:
+def _python_copy(config: AppConfig, job: BackupJob, dry_run: bool) -> CopyRunResult:
+    if not job.source_path.exists():
+        return CopyRunResult(False, None, f"source not found: {job.source_path}")
+    if not job.source_path.is_dir():
+        return CopyRunResult(False, None, f"source is not a directory: {job.source_path}")
+
+    copied = 0
+    skipped = 0
+    created_dirs = 0
+    planned_bytes = 0
+    try:
+        for root, dirs, files in os.walk(job.source_path):
+            dirs[:] = [name for name in dirs if not _is_excluded(name, config.backup.exclude_dirs)]
+            source_root = Path(root)
+            relative_root = source_root.relative_to(job.source_path)
+            destination_root = job.destination_path / relative_root
+            if config.backup.copy_empty_dirs and not dry_run:
+                destination_root.mkdir(parents=True, exist_ok=True)
+                created_dirs += 1
+            for name in files:
+                if _is_excluded(name, config.backup.exclude_files):
+                    continue
+                source_file = source_root / name
+                destination_file = destination_root / name
+                try:
+                    source_stat = source_file.stat()
+                except OSError:
+                    skipped += 1
+                    continue
+                if _destination_is_current(destination_file, source_stat.st_size, source_stat.st_mtime):
+                    skipped += 1
+                    continue
+                copied += 1
+                planned_bytes += source_stat.st_size
+                if not dry_run:
+                    destination_file.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(source_file, destination_file)
+    except OSError as exc:
+        return CopyRunResult(False, 1, str(exc))
+
+    mode = "would copy" if dry_run else "copied"
+    detail = (
+        f"python {mode} {copied} file(s), {planned_bytes} bytes; "
+        f"skipped {skipped}; created_dirs {0 if dry_run else created_dirs}"
+    )
+    _write_text_log(job.log_path, detail)
+    return CopyRunResult(True, 0, detail)
+
+
+def _summarize_process(proc: subprocess.CompletedProcess[str], backend: str) -> str:
     lines = []
     for stream in (proc.stdout, proc.stderr):
         for line in stream.splitlines():
@@ -172,5 +260,57 @@ def _summarize_process(proc: subprocess.CompletedProcess[str]) -> str:
             if stripped:
                 lines.append(stripped)
     if not lines:
-        return f"robocopy exit {proc.returncode}"
+        return f"{backend} exit {proc.returncode}"
     return lines[-1][:500]
+
+
+def _write_process_log(
+    path: Path,
+    cmd: list[str],
+    proc: subprocess.CompletedProcess[str],
+) -> None:
+    body = [
+        f"command: {_format_command(cmd)}",
+        f"exit_code: {proc.returncode}",
+        "",
+        "[stdout]",
+        proc.stdout,
+        "",
+        "[stderr]",
+        proc.stderr,
+    ]
+    _write_text_log(path, "\n".join(body))
+
+
+def _write_text_log(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8", errors="replace") as fh:
+        fh.write(text.rstrip())
+        fh.write("\n")
+
+
+def _as_rsync_dir(path: Path) -> str:
+    text = str(path)
+    return text if text.endswith(("/", "\\")) else f"{text}/"
+
+
+def _is_excluded(name: str, patterns: tuple[str, ...]) -> bool:
+    return any(fnmatch.fnmatchcase(name, pattern) for pattern in patterns)
+
+
+def _destination_is_current(path: Path, size: int, mtime: float) -> bool:
+    try:
+        stat = path.stat()
+    except OSError:
+        return False
+    return stat.st_size == size and int(stat.st_mtime) >= int(mtime)
+
+
+def _format_command(cmd: list[str]) -> str:
+    return " ".join(_quote_arg(item) for item in cmd)
+
+
+def _quote_arg(value: str) -> str:
+    if not value or any(char.isspace() for char in value):
+        return repr(value)
+    return value

@@ -10,7 +10,7 @@ from typing import Any
 from .backup import build_jobs, result_to_dict, run_job
 from .config import ConfigError, load_config
 from .monitor import dashboard_snapshot, scan_source_totals
-from .probe import net_view, path_exists, ping_host, robocopy_available, tcp_open
+from .probe import copy_backend_available, net_view, path_exists, ping_host, tcp_open
 from .rpc import (
     READONLY_EXTENDED_METHODS,
     READONLY_HARDWARE_METHODS,
@@ -56,7 +56,7 @@ def _build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--device", action="append", help="Limit to one device name. Repeatable.")
     doctor.set_defaults(handler=_cmd_doctor)
 
-    discover = subcommands.add_parser("discover", help="Run net view against each device.")
+    discover = subcommands.add_parser("discover", help="Discover SMB shares for each device.")
     discover.add_argument("--device", action="append", help="Limit to one device name. Repeatable.")
     discover.set_defaults(handler=_cmd_discover)
 
@@ -69,7 +69,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     plan.set_defaults(handler=_cmd_plan)
 
-    backup = subcommands.add_parser("backup", help="Run dry-run or real robocopy backup jobs.")
+    backup = subcommands.add_parser("backup", help="Run dry-run or real incremental backup jobs.")
     backup.add_argument("--device", action="append", help="Limit to one device name. Repeatable.")
     backup.add_argument(
         "--source-label",
@@ -77,7 +77,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Limit to one configured source label. Repeatable.",
     )
     dry_group = backup.add_mutually_exclusive_group()
-    dry_group.add_argument("--dry-run", action="store_true", help="Force robocopy /L.")
+    dry_group.add_argument("--dry-run", action="store_true", help="Preview copy actions without writing files.")
     dry_group.add_argument("--no-dry-run", action="store_true", help="Perform a real backup.")
     backup.add_argument(
         "--force-lock",
@@ -219,14 +219,17 @@ def _build_parser() -> argparse.ArgumentParser:
 def _cmd_doctor(config, args: argparse.Namespace) -> int:  # type: ignore[no-untyped-def]
     rows: list[dict[str, Any]] = []
     _add_row(rows, "local", "destination", path_exists(config.project.destination_root))
-    _add_row(rows, "local", "robocopy", robocopy_available())
-
+    _add_row(rows, "local", "copy_backend", copy_backend_available())
     for device in config.get_devices(args.device):
-        ping = ping_host(device.ip)
-        _add_row(rows, device.name, "ping", ping, required=False)
-        tcp = tcp_open(device.ip, config.backup.smb_port)
-        _add_row(rows, device.name, f"tcp/{config.backup.smb_port}", tcp)
-        if not tcp.ok:
+        endpoint_tcp_ok = False
+        for endpoint in device.endpoint_candidates():
+            scope = f"{device.name}/{endpoint.label}"
+            ping = ping_host(endpoint.ip)
+            _add_row(rows, scope, f"ping {endpoint.ip}", ping, required=False)
+            tcp = tcp_open(endpoint.ip, config.backup.smb_port)
+            endpoint_tcp_ok = endpoint_tcp_ok or tcp.ok
+            _add_row(rows, scope, f"tcp/{config.backup.smb_port}", tcp)
+        if not endpoint_tcp_ok:
             continue
         for source in config.source_roots_for(device):
             if not source.enabled:
@@ -243,21 +246,23 @@ def _cmd_doctor(config, args: argparse.Namespace) -> int:  # type: ignore[no-unt
 def _cmd_discover(config, args: argparse.Namespace) -> int:  # type: ignore[no-untyped-def]
     results = []
     for device in config.get_devices(args.device):
-        result = net_view(device.ip)
-        results.append(
-            {
-                "device": device.name,
-                "ip": device.ip,
-                "ok": result.ok,
-                "detail": result.detail,
-            }
-        )
+        for endpoint in device.endpoint_candidates():
+            result = net_view(endpoint.ip)
+            results.append(
+                {
+                    "device": device.name,
+                    "endpoint": endpoint.label,
+                    "ip": endpoint.ip,
+                    "ok": result.ok,
+                    "detail": result.detail,
+                }
+            )
 
     if args.json_output:
         _print_json(results)
     else:
         for item in results:
-            print(f"[{item['device']}] {item['ip']} ok={item['ok']}")
+            print(f"[{item['device']}/{item['endpoint']}] {item['ip']} ok={item['ok']}")
             print(item["detail"])
             print()
     return 0 if all(item["ok"] for item in results) else 1

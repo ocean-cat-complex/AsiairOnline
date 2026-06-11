@@ -77,6 +77,7 @@ def devices_payload(config: AppConfig) -> dict[str, Any]:
             {
                 "name": device.name,
                 "ip": device.ip,
+                "endpoints": [endpoint.as_dict() for endpoint in device.endpoint_candidates()],
                 "enabled": device.enabled,
                 "is_default": device.name == default_device.name,
                 "source_roots": [
@@ -123,21 +124,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     self.server.config.root / "docs" / "asiair-materials.html",
                     "text/html; charset=utf-8",
                 )
-            elif parsed.path == "/static/asiair-monitor-static-preview.html":
-                self._send_file(
-                    self.server.config.root / "docs" / "asiair-monitor-static-preview.html",
-                    "text/html; charset=utf-8",
-                )
             elif parsed.path == "/static/asiair-monitor-minterm-live.html":
                 self._send_file(
                     self.server.config.root / "docs" / "asiair-monitor-minterm-live.html",
                     "text/html; charset=utf-8",
-                )
-            elif parsed.path == "/drop/asiair-monitor-static-preview.html":
-                self._send_file(
-                    self.server.config.root / "docs" / "asiair-monitor-static-preview.html",
-                    "text/html; charset=utf-8",
-                    download_name="asiair-monitor-static-preview.html",
                 )
             elif parsed.path == "/drop/asiair-monitor-minterm-live.html":
                 self._send_file(
@@ -606,7 +596,7 @@ def start_backup(config: AppConfig, payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-LEGACY_INDEX_HTML = r"""<!doctype html>
+INDEX_HTML = r"""<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">

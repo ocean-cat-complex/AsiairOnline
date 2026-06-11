@@ -6,7 +6,7 @@ from typing import Any, Callable
 
 from .config import AppConfig, Device
 from .image_preview import current_image_response
-from .rpc import IMAGER_PORT, asiair_rpc, rpc_priority_session
+from .rpc import IMAGER_PORT, asiair_device_rpc
 from .web_control import control_state
 
 ControlSpec = dict[str, Any]
@@ -76,8 +76,8 @@ def camera_status_response(
             return None
         request_id += 1
         try:
-            response = asiair_rpc(
-                device.ip,
+            response = asiair_device_rpc(
+                device,
                 method,
                 params=params,
                 request_id=request_id,
@@ -134,6 +134,7 @@ def camera_status_response(
         "errors": errors,
         "snapshot_at": datetime.now().isoformat(timespec="seconds"),
         "device": {"name": device.name, "ip": device.ip},
+        "endpoints": [endpoint.as_dict() for endpoint in device.endpoint_candidates()],
         "lease": control_state(config, device.name, session_id=session_id),
         "app": {
             "page": app_state.get("page") if isinstance(app_state, dict) else None,
@@ -223,8 +224,8 @@ def camera_action_response(
         nonlocal request_id
         request_id += 1
         try:
-            response = asiair_rpc(
-                device.ip,
+            response = asiair_device_rpc(
+                device,
                 method,
                 params=params,
                 request_id=request_id,
@@ -248,8 +249,8 @@ def camera_action_response(
         request_id += 1
         started = time.perf_counter()
         try:
-            response = asiair_rpc(
-                device.ip,
+            response = asiair_device_rpc(
+                device,
                 method,
                 params=params,
                 request_id=request_id,
@@ -340,6 +341,7 @@ def camera_action_response(
         return {
             "ok": True,
             "device": {"name": device.name, "ip": device.ip},
+            "endpoints": [endpoint.as_dict() for endpoint in device.endpoint_candidates()],
             "action": action_name,
             "writes": writes,
             "ignored_fields": ignored_fields,
@@ -364,6 +366,7 @@ def camera_action_response(
         return {
             "ok": True,
             "device": {"name": device.name, "ip": device.ip},
+            "endpoints": [endpoint.as_dict() for endpoint in device.endpoint_candidates()],
             "action": action_name,
             "writes": writes,
             "ignored_fields": ignored_fields,
@@ -404,6 +407,7 @@ def camera_action_response(
         return {
             "ok": True,
             "device": {"name": device.name, "ip": device.ip},
+            "endpoints": [endpoint.as_dict() for endpoint in device.endpoint_candidates()],
             "action": action_name,
             "writes": writes,
             "ignored_fields": ignored_fields,

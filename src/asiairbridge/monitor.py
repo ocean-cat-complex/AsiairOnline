@@ -3,6 +3,7 @@ from __future__ import annotations
 import fnmatch
 import json
 import os
+import shutil
 import subprocess
 import time
 from dataclasses import dataclass
@@ -12,7 +13,7 @@ from typing import Any
 
 from .backup import BackupJob, build_jobs
 from .config import AppConfig
-from .rpc import asiair_rpc
+from .rpc import asiair_device_rpc
 from .state import read_latest_state
 
 
@@ -111,15 +112,6 @@ def infer_active_jobs(jobs: list[BackupJob], lock: dict[str, Any]) -> list[dict[
                 continue
             active.append(job)
 
-    command_lines = _robocopy_command_lines()
-    for command_line in command_lines:
-        normalized = command_line.lower()
-        for job in jobs:
-            source_text = str(job.source_path).rstrip("\\/").lower()
-            destination_text = str(job.destination_path).rstrip("\\/").lower()
-            if source_text in normalized or destination_text in normalized:
-                active.append(job)
-
     seen = set()
     rows = []
     for job in active:
@@ -176,7 +168,7 @@ def collect_source_stats(config: AppConfig, job: BackupJob) -> dict[str, Any]:
 def collect_asiair_emmc_stats(job: BackupJob) -> dict[str, Any]:
     started = time.perf_counter()
     scanned_at = datetime.now().isoformat(timespec="seconds")
-    response = asiair_rpc(job.device.ip, "get_disk_volume")
+    response = asiair_device_rpc(job.device, "get_disk_volume")
     if int(response.get("code") or 0) != 0:
         raise ValueError(f"ASIAIR get_disk_volume failed: {response}")
 
@@ -286,19 +278,18 @@ def collect_network_stats(config: AppConfig, now: float) -> dict[str, Any]:
 
 
 def _collect_tailscale_stats(previous: dict[str, Any] | None, now: float) -> dict[str, Any] | None:
-    if os.name != "nt":
-        return None
     if previous and now - float(previous.get("sampled_at", 0)) < 5:
         return previous
+    return _collect_tailscale_cli_stats(previous, now)
 
-    script = (
-        "$s = Get-NetAdapterStatistics -Name Tailscale -ErrorAction Stop; "
-        "[pscustomobject]@{ReceivedBytes=$s.ReceivedBytes;SentBytes=$s.SentBytes} "
-        "| ConvertTo-Json -Compress"
-    )
+
+def _collect_tailscale_cli_stats(previous: dict[str, Any] | None, now: float) -> dict[str, Any] | None:
+    executable = _tailscale_executable()
+    if executable is None:
+        return None
     try:
         proc = subprocess.run(
-            ["powershell", "-NoProfile", "-Command", script],
+            [executable, "status", "--json"],
             capture_output=True,
             text=True,
             errors="replace",
@@ -308,29 +299,39 @@ def _collect_tailscale_stats(previous: dict[str, Any] | None, now: float) -> dic
         return {
             "ok": False,
             "adapter": "Tailscale",
+            "source": "tailscale_cli",
             "sampled_at": now,
             "error": str(exc),
         }
-
     if proc.returncode != 0:
         return {
             "ok": False,
             "adapter": "Tailscale",
+            "source": "tailscale_cli",
             "sampled_at": now,
             "error": proc.stderr.strip() or proc.stdout.strip(),
         }
-
     try:
         payload = json.loads(proc.stdout)
-        received_bytes = int(payload.get("ReceivedBytes") or 0)
-        sent_bytes = int(payload.get("SentBytes") or 0)
-    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+    except json.JSONDecodeError as exc:
         return {
             "ok": False,
             "adapter": "Tailscale",
+            "source": "tailscale_cli",
             "sampled_at": now,
             "error": str(exc),
         }
+
+    self_info = payload.get("Self") if isinstance(payload.get("Self"), dict) else {}
+    peer_info = payload.get("Peer") if isinstance(payload.get("Peer"), dict) else {}
+    received_bytes = int(self_info.get("RxBytes") or 0)
+    sent_bytes = int(self_info.get("TxBytes") or 0)
+    if received_bytes == 0 and sent_bytes == 0:
+        for peer in peer_info.values():
+            if not isinstance(peer, dict):
+                continue
+            received_bytes += int(peer.get("RxBytes") or 0)
+            sent_bytes += int(peer.get("TxBytes") or 0)
 
     receive_rate = None
     send_rate = None
@@ -343,14 +344,30 @@ def _collect_tailscale_stats(previous: dict[str, Any] | None, now: float) -> dic
             send_rate = send_delta / elapsed
 
     return {
-        "ok": True,
+        "ok": bool(payload.get("BackendState") == "Running" or payload.get("TUN")),
         "adapter": "Tailscale",
+        "source": "tailscale_cli",
         "sampled_at": now,
+        "backend_state": payload.get("BackendState"),
+        "tailscale_ips": payload.get("TailscaleIPs") or [],
         "received_bytes": received_bytes,
         "sent_bytes": sent_bytes,
         "receive_bytes_per_second": receive_rate,
         "send_bytes_per_second": send_rate,
     }
+
+
+def _tailscale_executable() -> str | None:
+    path = shutil.which("tailscale")
+    if path:
+        return path
+    candidates = [
+        Path("/Applications/Tailscale.app/Contents/MacOS/Tailscale"),
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+    return None
 
 
 def read_lock(path: Path) -> dict[str, Any]:
@@ -381,15 +398,6 @@ def read_lock(path: Path) -> dict[str, Any]:
 def pid_is_running(pid: int) -> bool:
     if pid <= 0:
         return False
-    if os.name == "nt":
-        proc = subprocess.run(
-            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
-            capture_output=True,
-            text=True,
-            errors="replace",
-        )
-        text = proc.stdout.strip()
-        return str(pid) in text and not text.startswith("INFO:")
     try:
         os.kill(pid, 0)
         return True
@@ -466,6 +474,7 @@ def _job_status(
     return {
         "device": job.device.name,
         "ip": job.device.ip,
+        "endpoints": [endpoint.as_dict() for endpoint in job.device.endpoint_candidates()],
         "source_label": job.source.label,
         "source_path": str(job.source_path),
         "destination_path": str(job.destination_path),
@@ -543,28 +552,6 @@ def _state_file(config: AppConfig, filename: str) -> Path:
 
 def _job_key(job: BackupJob) -> str:
     return f"{job.device.name}|{job.source.label}"
-
-
-def _robocopy_command_lines() -> list[str]:
-    if os.name != "nt":
-        return []
-    script = (
-        "Get-CimInstance Win32_Process -Filter \"Name = 'Robocopy.exe'\" "
-        "| Select-Object -ExpandProperty CommandLine"
-    )
-    try:
-        proc = subprocess.run(
-            ["powershell", "-NoProfile", "-Command", script],
-            capture_output=True,
-            text=True,
-            errors="replace",
-            timeout=5,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return []
-    if proc.returncode != 0:
-        return []
-    return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
 
 
 def _is_excluded(name: str, patterns: tuple[str, ...]) -> bool:

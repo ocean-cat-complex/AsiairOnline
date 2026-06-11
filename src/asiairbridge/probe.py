@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import locale
 import shutil
 import socket
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -14,18 +14,24 @@ class ProbeResult:
     detail: str
 
 
-def robocopy_available() -> ProbeResult:
-    path = shutil.which("robocopy")
+def copy_backend_available() -> ProbeResult:
+    path = shutil.which("rsync")
     if path:
-        return ProbeResult(True, path)
-    return ProbeResult(False, "robocopy was not found on PATH")
+        return ProbeResult(True, f"rsync: {path}")
+    return ProbeResult(True, "python copy fallback")
 
 
 def ping_host(host: str, timeout_ms: int = 1000) -> ProbeResult:
-    cmd = ["ping", "-n", "1", "-w", str(timeout_ms), host]
+    cmd, timeout_seconds = _ping_command(host, timeout_ms)
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
-    except OSError as exc:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=timeout_seconds,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
         return ProbeResult(False, str(exc))
     detail = _first_meaningful_line(proc.stdout) or _first_meaningful_line(proc.stderr)
     return ProbeResult(proc.returncode == 0, detail or f"exit {proc.returncode}")
@@ -49,20 +55,38 @@ def path_exists(path: Path) -> ProbeResult:
 
 
 def net_view(host: str) -> ProbeResult:
-    cmd = ["net", "view", f"\\\\{host}"]
-    encoding = locale.getpreferredencoding(False)
-    try:
-        proc = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            encoding=encoding,
-            errors="replace",
-        )
-    except OSError as exc:
-        return ProbeResult(False, str(exc))
-    output = (proc.stdout + "\n" + proc.stderr).strip()
-    return ProbeResult(proc.returncode == 0, output or f"exit {proc.returncode}")
+    return _smb_view(host)
+
+
+def _ping_command(host: str, timeout_ms: int) -> tuple[list[str], float]:
+    timeout_seconds = max(1.0, timeout_ms / 1000 + 0.5)
+    if sys.platform == "darwin":
+        return ["ping", "-c", "1", "-W", str(timeout_ms), host], timeout_seconds
+    wait_seconds = max(1, int((timeout_ms + 999) / 1000))
+    return ["ping", "-c", "1", "-W", str(wait_seconds), host], timeout_seconds
+
+
+def _smb_view(host: str) -> ProbeResult:
+    smbutil = shutil.which("smbutil")
+    if smbutil:
+        cmd = [smbutil, "view", "-N", f"//{host}"]
+        try:
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                errors="replace",
+                timeout=8,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return ProbeResult(False, str(exc))
+        output = (proc.stdout + "\n" + proc.stderr).strip()
+        return ProbeResult(proc.returncode == 0, output or f"exit {proc.returncode}")
+
+    tcp = tcp_open(host, 445)
+    if tcp.ok:
+        return ProbeResult(True, "smbutil not found; tcp/445 is open")
+    return ProbeResult(False, f"smbutil not found; {tcp.detail}")
 
 
 def _first_meaningful_line(text: str) -> str:

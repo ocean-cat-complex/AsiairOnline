@@ -233,6 +233,7 @@ def _empty_payload(config: AppConfig, device: Device, error: str) -> dict[str, A
         "errors": [{"method": "camera_cache", "error": error}],
         "snapshot_at": datetime.now().isoformat(timespec="seconds"),
         "device": {"name": device.name, "ip": device.ip},
+        "endpoints": [endpoint.as_dict() for endpoint in device.endpoint_candidates()],
         "lease": control_state(config, device.name, session_id=None),
         "app": {
             "page": None,

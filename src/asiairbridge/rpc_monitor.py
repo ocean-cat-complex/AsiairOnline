@@ -14,7 +14,7 @@ from typing import Any
 from .config import AppConfig, Device
 from .monitor import collect_network_stats, read_lock
 from .probe import tcp_open
-from .rpc import GUIDER_PORT, IMAGER_PORT, _redact_sensitive, asiair_rpc
+from .rpc import GUIDER_PORT, IMAGER_PORT, _redact_sensitive, asiair_device_rpc
 
 
 @dataclass(frozen=True)
@@ -629,8 +629,8 @@ def _run_call(device: Device, call: MonitorCall, request_id: int) -> dict[str, A
     started = time.perf_counter()
     updated_at = datetime.now().isoformat(timespec="seconds")
     try:
-        response = asiair_rpc(
-            device.ip,
+        response = asiair_device_rpc(
+            device,
             call.method,
             params=call.params,
             request_id=request_id,
@@ -644,6 +644,7 @@ def _run_call(device: Device, call: MonitorCall, request_id: int) -> dict[str, A
             "_monotonic": time.monotonic(),
             "device": device.name,
             "ip": device.ip,
+            "endpoint": response.get("_endpoint"),
             "port": call.port,
             "method": call.method,
             "params": call.params,
@@ -798,8 +799,29 @@ def _link_status(server: Any, device: Device, ready_items: list[dict[str, Any]])
 
 
 def _probe_link(server: Any, device: Device, ready_items: list[dict[str, Any]]) -> dict[str, Any]:
-    ping = _ping_latency(device.ip)
-    smb = tcp_open(device.ip, server.config.backup.smb_port, timeout_seconds=LINK_TCP_TIMEOUT_SECONDS)
+    endpoint_links = []
+    for endpoint in device.endpoint_candidates():
+        ping_item = _ping_latency(endpoint.ip)
+        smb_item = tcp_open(endpoint.ip, server.config.backup.smb_port, timeout_seconds=LINK_TCP_TIMEOUT_SECONDS)
+        endpoint_links.append(
+            {
+                "label": endpoint.label,
+                "ip": endpoint.ip,
+                "kind": endpoint.kind,
+                "priority": endpoint.priority,
+                "ping": ping_item,
+                "smb": {
+                    "ok": smb_item.ok,
+                    "port": server.config.backup.smb_port,
+                    "detail": smb_item.detail,
+                },
+                "ok": bool(ping_item.get("ok") or smb_item.ok),
+            }
+        )
+
+    selected_endpoint = next((item for item in endpoint_links if item["ok"]), endpoint_links[0])
+    ping = selected_endpoint["ping"]
+    smb = selected_endpoint["smb"]
     rpc = _rpc_latency(ready_items)
     network = collect_network_stats(server.config, time.time()).get("tailscale") or {}
     transfer = _transfer_status(server, device, network)
@@ -807,7 +829,7 @@ def _probe_link(server: Any, device: Device, ready_items: list[dict[str, Any]]) 
     primary_ok = bool(ping["ok"] or rpc["ok"])
     degraded = (
         not primary_ok
-        or not smb.ok
+        or not smb["ok"]
         or (ping.get("latency_ms") is not None and float(ping["latency_ms"]) >= 300)
         or (rpc.get("latency_ms") is not None and float(rpc["latency_ms"]) >= 500)
     )
@@ -827,12 +849,14 @@ def _probe_link(server: Any, device: Device, ready_items: list[dict[str, Any]]) 
         "quality": quality,
         "device": device.name,
         "ip": device.ip,
+        "endpoint": selected_endpoint,
+        "endpoints": endpoint_links,
         "ping": ping,
         "rpc": rpc,
         "smb": {
-            "ok": smb.ok,
-            "port": server.config.backup.smb_port,
-            "detail": smb.detail,
+            "ok": smb["ok"],
+            "port": smb["port"],
+            "detail": smb["detail"],
         },
         "tailscale": _tailscale_link(network),
         "transfer": transfer,

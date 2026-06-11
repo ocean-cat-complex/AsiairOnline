@@ -1,87 +1,110 @@
 # AsiairOnline
 
-ASIAIR remote operations and backup helper for Windows hosts that reach one or more ASIAIR boxes through Tailscale or a private LAN.
+ASIAIR monitoring and backup sidecar for macOS hosts on the same Tailscale or private LAN as the devices.
 
-The project provides:
+This branch is trimmed for the remote observatory website integration:
 
-- Incremental backup from ASIAIR SMB shares to a local material library.
-- A web dashboard for device monitoring, camera preview, camera controls, and local material browsing.
-- A local SQLite index for cached material metadata and generated preview images.
-- Per-device control leases so multiple tailnet users can watch the dashboard while write actions stay gated.
+- Live ASIAIR JSON-RPC monitoring with endpoint failover.
+- Current-image preview and guarded camera controls.
+- Local material index backed by the configured backup destination.
+- Incremental backup from mounted ASIAIR SMB shares.
+- A three-device model where each physical ASIAIR can expose multiple network endpoints.
+
+## Requirements
+
+- macOS with Homebrew arm64 Python 3.13 recommended.
+- Tailscale connected to the device subnet, or direct LAN access.
+- ASIAIR SMB shares mounted under `/Volumes/<device name>/...` before running backups.
+
+The package requires Python 3.12 or newer.
 
 ## Quick Start
 
-Create a local config from the public template:
+Create a private config:
 
-```powershell
-Copy-Item .\config\devices.example.json .\config\devices.json
-notepad .\config\devices.json
+```bash
+cp config/devices.example.json config/devices.json
+$EDITOR config/devices.json
 ```
-
-Fill in your real ASIAIR names, IPs, SMB source shares, backup destination, and optional private path prefixes. `config/devices.json` is intentionally ignored by git.
 
 Run local checks:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\doctor.ps1
+```bash
+PYTHON=/opt/homebrew/bin/python3.13 ./scripts/doctor.sh
 ```
 
 Preview the backup plan without copying data:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\backup-all.ps1
+```bash
+PYTHON=/opt/homebrew/bin/python3.13 ./scripts/backup-all.sh
 ```
 
-Run the approved incremental backup:
+Run the incremental backup after the dry run looks correct:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\backup-all.ps1 -Run
+```bash
+RUN_BACKUP=1 PYTHON=/opt/homebrew/bin/python3.13 ./scripts/backup-all.sh
 ```
 
-Start the local-only web service:
+Start the web service on localhost:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\start-web.ps1
+```bash
+PYTHON=/opt/homebrew/bin/python3.13 ./scripts/start-web.sh
 ```
 
-Expose the dashboard to other devices in the same tailnet:
+Expose it to other machines in the tailnet only when needed:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\start-web.ps1 -HostName 0.0.0.0
+```bash
+HOST=0.0.0.0 PYTHON=/opt/homebrew/bin/python3.13 ./scripts/start-web.sh
 ```
 
-Then open `http://<server-tailnet-ip>:8787/` from another Tailscale device. Use `tailscale ip -4` on the server to find the address.
+Then open `http://<server-tailnet-ip>:8787/`.
 
 ## Web Pages
 
-- `/monitor-minterm`: high-density live monitor.
-- `/camera`: current image preview, camera status, exposure controls, and camera controls protected by the main-control lease.
-- `/materials`: local material library browser backed by the configured backup destination and cached preview images.
+- `/monitor-minterm`: dense live monitor.
+- `/camera`: current image preview, camera status, exposure controls, and control lease actions.
+- `/materials`: local material library browser.
 
 ## Configuration
 
-All environment-specific values live in `config/devices.json`:
+All environment-specific values live in `config/devices.json`, which is ignored by git.
 
-- ASIAIR device names and IP addresses.
-- Enabled SMB shares such as `EMMC Images`, `TF Images`, or `Udisk Images`.
-- Local backup destination.
-- Default device for the dashboard.
-- Private path prefixes that should be folded in the UI display.
-- Backup retry, exclusion, and robocopy settings.
+Model each physical ASIAIR as one device with multiple `endpoints`:
 
-Keep credentials outside this repository. Use Windows Credential Manager, `net use`, Tailscale authentication, or another external secret store.
+```json
+{
+  "name": "asiair-a",
+  "ip": "192.168.8.101",
+  "endpoints": [
+    {"label": "wired", "ip": "192.168.8.101", "priority": 0},
+    {"label": "wifi-bridge", "ip": "192.168.8.102", "priority": 10}
+  ]
+}
+```
+
+Read-only RPC and image reads try enabled endpoints in priority order. Write/control actions use the preferred endpoint by default to avoid duplicate commands if a response times out on one link.
+
+For backups, mount ASIAIR shares under paths that match `path_template`, for example:
+
+```text
+/Volumes/asiair-a/EMMC Images
+/Volumes/asiair-b/TF Images
+/Volumes/asiair-b/Udisk Images
+```
+
+Keep ASIAIR, SMB, and Tailscale credentials outside the repository.
 
 ## Safety
 
-Backup commands are incremental and do not mirror-delete. The project does not use destructive flags such as `robocopy /MIR` or `/PURGE`.
+Backups are incremental and never use mirror-delete behavior. The rsync backend does not pass `--delete`; the Python fallback only copies new or changed files.
 
-By default, the web server binds to `127.0.0.1`. Bind to `0.0.0.0` only when you intentionally want tailnet access.
+The web service binds to `127.0.0.1` by default. Use `HOST=0.0.0.0` only for intentional tailnet access.
 
 ## Project Layout
 
-- `config/devices.example.json`: public example configuration.
-- `src/asiairbridge/`: Python CLI, backup logic, JSON-RPC monitor, web server, camera operations, and material library.
-- `scripts/`: Windows PowerShell entry points.
+- `config/devices.example.json`: public macOS example configuration.
+- `src/asiairbridge/`: CLI, backup logic, JSON-RPC monitor, web server, camera operations, and material library.
+- `scripts/*.sh`: macOS/Linux operational entry points.
 - `docs/asiair-monitor-minterm-live.html`: live monitor frontend.
 - `docs/asiair-image-preview.html`: camera frontend.
 - `docs/asiair-materials.html`: material library frontend.
