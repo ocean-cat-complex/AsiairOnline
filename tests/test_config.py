@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from asiairbridge.config import load_config
+from asiairbridge.config import ConfigError, load_config
 
 
 class ConfigTests(unittest.TestCase):
@@ -89,6 +89,91 @@ class ConfigTests(unittest.TestCase):
 
             self.assertEqual(config.root, root.resolve())
             self.assertEqual(config.project.destination_root, (root / "state" / "backups").resolve())
+
+    def test_invalid_smb_port_reports_config_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / "config" / "devices.json"
+            config_path.parent.mkdir()
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "project": {"destination_root": "state/backups"},
+                        "backup": {
+                            "smb_port": "bad",
+                            "source_roots": [
+                                {
+                                    "label": "EMMC Images",
+                                    "path_template": "/Volumes/{name}/EMMC Images",
+                                }
+                            ],
+                        },
+                        "devices": [{"name": "pier-a", "ip": "192.168.8.10"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(ConfigError):
+                load_config(config_path)
+
+    def test_invalid_path_template_reports_config_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / "config" / "devices.json"
+            config_path.parent.mkdir()
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "project": {"destination_root": "state/backups"},
+                        "backup": {
+                            "source_roots": [
+                                {
+                                    "label": "EMMC Images",
+                                    "path_template": "/Volumes/{unknown}/EMMC Images",
+                                }
+                            ]
+                        },
+                        "devices": [{"name": "pier-a", "ip": "192.168.8.10"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(ConfigError):
+                load_config(config_path)
+
+    def test_invalid_endpoint_priority_reports_config_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / "config" / "devices.json"
+            config_path.parent.mkdir()
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "project": {"destination_root": "state/backups"},
+                        "backup": {
+                            "source_roots": [
+                                {
+                                    "label": "EMMC Images",
+                                    "path_template": "/Volumes/{name}/EMMC Images",
+                                }
+                            ]
+                        },
+                        "devices": [
+                            {
+                                "name": "pier-a",
+                                "ip": "192.168.8.10",
+                                "endpoints": [{"ip": "192.168.8.10", "priority": "bad"}],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(ConfigError):
+                load_config(config_path)
 
 
 if __name__ == "__main__":

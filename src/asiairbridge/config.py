@@ -226,7 +226,7 @@ def _parse_backup(raw: dict[str, Any]) -> BackupSettings:
     return BackupSettings(
         dry_run_default=bool(raw.get("dry_run_default", True)),
         copy_empty_dirs=bool(raw.get("copy_empty_dirs", True)),
-        smb_port=int(raw.get("smb_port", 445)),
+        smb_port=_int_in_range(raw, "smb_port", 445, 1, 65535),
         exclude_dirs=tuple(str(item) for item in raw.get("exclude_dirs", [])),
         exclude_files=tuple(str(item) for item in raw.get("exclude_files", [])),
         source_roots=source_roots,
@@ -274,12 +274,13 @@ def _parse_endpoints(raw: dict[str, Any], primary_ip: str) -> tuple[DeviceEndpoi
                 )
             elif isinstance(item, dict):
                 ip = str(_required(item, "ip"))
+                default_priority = 0 if ip == primary_ip else 100 + index
                 endpoints.append(
                     DeviceEndpoint(
                         label=str(item.get("label") or ("primary" if ip == primary_ip else f"endpoint-{index + 1}")),
                         ip=ip,
                         kind=str(item.get("kind") or "") or None,
-                        priority=int(item.get("priority", 0 if ip == primary_ip else 100 + index)),
+                        priority=_int_in_range(item, "priority", default_priority, 0, 10000),
                         enabled=bool(item.get("enabled", True)),
                     )
                 )
@@ -298,17 +299,23 @@ def _parse_endpoints(raw: dict[str, Any], primary_ip: str) -> tuple[DeviceEndpoi
 
 
 def _parse_source_root(raw: dict[str, Any]) -> SourceRoot:
+    label = str(_required(raw, "label"))
+    path_template = str(_required(raw, "path_template"))
     path_templates = raw.get("path_templates") or raw.get("path_template_by_platform")
     if path_templates is not None and not isinstance(path_templates, dict):
         raise ConfigError("source_root.path_templates must be an object when provided")
+    parsed_templates = (
+        {str(key): str(value) for key, value in path_templates.items()}
+        if path_templates is not None
+        else None
+    )
+    _validate_path_template(label, path_template)
+    for platform, template in (parsed_templates or {}).items():
+        _validate_path_template(f"{label}.{platform}", template)
     return SourceRoot(
-        label=str(_required(raw, "label")),
-        path_template=str(_required(raw, "path_template")),
-        path_templates=(
-            {str(key): str(value) for key, value in path_templates.items()}
-            if path_templates is not None
-            else None
-        ),
+        label=label,
+        path_template=path_template,
+        path_templates=parsed_templates,
         enabled=bool(raw.get("enabled", True)),
     )
 
@@ -317,6 +324,27 @@ def _required(raw: dict[str, Any], key: str) -> Any:
     if key not in raw or raw[key] in (None, ""):
         raise ConfigError(f"Missing required config key: {key}")
     return raw[key]
+
+
+def _validate_path_template(label: str, path_template: str) -> None:
+    try:
+        path_template.format(ip="0.0.0.0", name="_probe_")
+    except (KeyError, IndexError, ValueError) as exc:
+        raise ConfigError(
+            f"Invalid path_template for source '{label}': {path_template!r} "
+            f"(only {{ip}} and {{name}} placeholders are allowed) - {exc}"
+        ) from exc
+
+
+def _int_in_range(raw: dict[str, Any], key: str, default: int, low: int, high: int) -> int:
+    value = raw.get(key, default)
+    try:
+        number = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(f"Config key '{key}' must be an integer, got {value!r}") from exc
+    if not low <= number <= high:
+        raise ConfigError(f"Config key '{key}' must be between {low} and {high}, got {number}")
+    return number
 
 
 def _resolve_path(root: Path, value: str | Path) -> Path:

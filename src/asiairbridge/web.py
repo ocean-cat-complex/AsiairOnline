@@ -19,7 +19,7 @@ from .config import AppConfig, load_config
 from .image_preview import cached_image_path, cached_raw_path, current_image_response
 from .materials import MaterialLibrary
 from .monitor import dashboard_snapshot, read_log_tail, read_lock, scan_source_totals
-from .rpc_monitor import RPC_MONITOR_HTML, init_rpc_monitor_state, rpc_monitor_response
+from .rpc_monitor import init_rpc_monitor_state, rpc_monitor_response
 from .web_control import ControlLeaseBusyError, control_state, update_control_role
 
 DASHBOARD_SOURCE_LABEL = "EMMC Images"
@@ -107,8 +107,6 @@ class DashboardHandler(BaseHTTPRequestHandler):
         try:
             if parsed.path == "/":
                 self._redirect("/monitor-minterm")
-            elif parsed.path == "/monitor":
-                self._send_html(RPC_MONITOR_HTML)
             elif parsed.path == "/monitor-minterm":
                 self._send_file(
                     self.server.config.root / "docs" / "asiair-monitor-minterm-live.html",

@@ -15,6 +15,7 @@ from .config import AppConfig, Device
 
 IMAGER_PORT = 4700
 GUIDER_PORT = 4400
+MAX_RPC_RESPONSE_BYTES = 16 * 1024 * 1024
 
 
 class _EndpointGate:
@@ -374,12 +375,25 @@ def asiair_rpc(
         queue_timeout_seconds=queue_timeout_seconds,
     ):
         with socket.create_connection((ip, port), timeout=timeout_seconds) as sock:
-            sock.settimeout(timeout_seconds)
             sock.sendall(payload)
-            while time.monotonic() < deadline:
-                chunk = sock.recv(65536)
+            total_bytes = 0
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                sock.settimeout(remaining)
+                try:
+                    chunk = sock.recv(65536)
+                except socket.timeout:
+                    break
                 if not chunk:
                     break
+                total_bytes += len(chunk)
+                if total_bytes > MAX_RPC_RESPONSE_BYTES:
+                    raise ValueError(
+                        f"ASIAIR RPC response from {ip}:{port} {method} exceeded "
+                        f"{MAX_RPC_RESPONSE_BYTES} bytes without a matching reply"
+                    )
                 buffer += chunk
                 lines = buffer.split(b"\n")
                 buffer = lines.pop()
