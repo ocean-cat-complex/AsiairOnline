@@ -182,7 +182,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
     except json.JSONDecodeError as exc:
         raise ConfigError(f"Config file is not valid JSON: {exc}") from exc
 
-    root = config_path.parent.parent
+    root = config_path.parent.parent if config_path.parent.name == "config" else config_path.parent
     project = _parse_project(raw.get("project", {}), root)
     backup = _parse_backup(raw.get("backup", {}))
     devices = _parse_devices(raw.get("devices", []))

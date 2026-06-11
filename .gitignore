@@ -1,4 +1,5 @@
 config/devices.json
+/devices.json
 logs/
 state/
 .venv/

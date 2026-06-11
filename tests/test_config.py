@@ -63,6 +63,33 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(config.display_path(root / "state" / "backups" / "pier-a"), ".../pier-a")
             self.assertEqual(device.endpoint_ips(), ("192.168.8.10", "192.168.8.20"))
 
+    def test_root_level_config_uses_its_own_directory_as_project_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / "devices.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "project": {"destination_root": "state/backups"},
+                        "backup": {
+                            "source_roots": [
+                                {
+                                    "label": "EMMC Images",
+                                    "path_template": "/Volumes/{name}/EMMC Images",
+                                }
+                            ]
+                        },
+                        "devices": [{"name": "pier-a", "ip": "192.168.8.10"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            config = load_config(config_path)
+
+            self.assertEqual(config.root, root.resolve())
+            self.assertEqual(config.project.destination_root, (root / "state" / "backups").resolve())
+
 
 if __name__ == "__main__":
     unittest.main()
