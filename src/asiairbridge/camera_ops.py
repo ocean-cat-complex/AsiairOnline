@@ -6,7 +6,7 @@ from typing import Any, Callable
 
 from .config import AppConfig, Device
 from .image_preview import current_image_response
-from .rpc import IMAGER_PORT, asiair_device_rpc
+from .rpc import IMAGER_PORT, asiair_device_rpc, asiair_device_rpc_batch
 from .web_control import control_state
 
 ControlSpec = dict[str, Any]
@@ -141,6 +141,9 @@ def camera_status_response(
             "capture_state": capture.get("state") if isinstance(capture, dict) else None,
             "capture_working": bool(capture.get("is_working")) if isinstance(capture, dict) else False,
             "exposure_mode": capture.get("exposure_mode") if isinstance(capture, dict) else None,
+            "capture_lapse_ms": _capture_int(capture, "lapse_ms"),
+            "capture_total_ms": _capture_int(capture, "total_ms"),
+            "capture_progress": _capture_progress(capture),
         },
         "camera": {
             "name": camera_state.get("name") if isinstance(camera_state, dict) else None,
@@ -179,6 +182,74 @@ def camera_status_response(
             "bin": image_info.get("bin") if isinstance(image_info, dict) else None,
         },
     }
+
+
+def capture_progress_response(
+    config: AppConfig,
+    device_name: str | None,
+    *,
+    rpc_timeout_seconds: float = 1.5,
+) -> dict[str, Any]:
+    device = _select_device(config, device_name)
+    try:
+        response = asiair_device_rpc(
+            device,
+            "get_app_state",
+            request_id=72_000,
+            port=IMAGER_PORT,
+            timeout_seconds=rpc_timeout_seconds,
+            priority="foreground",
+            queue_timeout_seconds=1.0,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "ok": False,
+            "device": {"name": device.name, "ip": device.ip},
+            "endpoints": [endpoint.as_dict() for endpoint in device.endpoint_candidates()],
+            "error": str(exc),
+        }
+    if response.get("code") != 0:
+        return {
+            "ok": False,
+            "device": {"name": device.name, "ip": device.ip},
+            "endpoints": [endpoint.as_dict() for endpoint in device.endpoint_candidates()],
+            "error": f"get_app_state returned code {response.get('code')}",
+        }
+    result = response.get("result")
+    capture = result.get("capture") if isinstance(result, dict) else {}
+    if not isinstance(capture, dict):
+        capture = {}
+    return {
+        "ok": True,
+        "device": {"name": device.name, "ip": device.ip},
+        "endpoints": [endpoint.as_dict() for endpoint in device.endpoint_candidates()],
+        "endpoint": response.get("_endpoint"),
+        "snapshot_at": datetime.now().isoformat(timespec="seconds"),
+        "page": result.get("page") if isinstance(result, dict) else None,
+        "state": capture.get("state"),
+        "is_working": bool(capture.get("is_working")),
+        "exposure_mode": capture.get("exposure_mode"),
+        "lapse_ms": _capture_int(capture, "lapse_ms"),
+        "total_ms": _capture_int(capture, "total_ms"),
+        "progress": _capture_progress(capture),
+    }
+
+
+def _capture_int(capture: Any, key: str) -> int | None:
+    if not isinstance(capture, dict):
+        return None
+    try:
+        return int(capture.get(key))
+    except (TypeError, ValueError):
+        return None
+
+
+def _capture_progress(capture: Any) -> float | None:
+    lapse = _capture_int(capture, "lapse_ms")
+    total = _capture_int(capture, "total_ms")
+    if lapse is None or not total or total <= 0:
+        return None
+    return round(min(max(lapse / total, 0.0), 1.0), 4)
 
 
 def camera_action_response(
@@ -352,17 +423,40 @@ def camera_action_response(
         progress(1, 3, "校验相机参数")
         if "sixteen_bit" in payload:
             ignored_fields.append("sixteen_bit")
-        planned = [key for key in CONTROL_SPECS if key in payload]
-        total = max(2, len(planned) + 2)
-        for key, spec in CONTROL_SPECS.items():
-            if key not in payload:
-                continue
+        planned = [(key, spec) for key, spec in CONTROL_SPECS.items() if key in payload]
+        batch: list[tuple[str, Any]] = []
+        for key, spec in planned:
             coerce: Callable[[Any], Any] = spec["coerce"]
-            value = coerce(payload.get(key))
-            progress(1 + len(writes) + 1, total, f"写入 {spec['rpc']}：{value}")
-            rpc("set_control_value", [spec["rpc"], value], timeout_seconds=12.0)
-        progress(total, total, "相机参数写入完成", state="done")
-        time.sleep(0.12)
+            batch.append(("set_control_value", [spec["rpc"], coerce(payload.get(key))]))
+        if batch:
+            progress(2, 3, f"批量写入 {len(batch)} 项相机参数")
+            started = time.perf_counter()
+            responses = asiair_device_rpc_batch(
+                device,
+                batch,
+                port=IMAGER_PORT,
+                priority="write",
+                timeout_seconds=8.0,
+            )
+            elapsed = round(time.perf_counter() - started, 3)
+            for (_, spec), response, (_, params) in zip(planned, responses, batch):
+                if response is None:
+                    raise RuntimeError(f"set_control_value {spec['rpc']} got no response")
+                if response.get("code") != 0:
+                    raise RuntimeError(
+                        f"set_control_value {spec['rpc']} failed with code {response.get('code')}"
+                    )
+                writes.append(
+                    {
+                        "method": "set_control_value",
+                        "params": params,
+                        "code": response.get("code"),
+                        "seconds": elapsed,
+                        "endpoint": response.get("_endpoint"),
+                    }
+                )
+        progress(3, 3, "相机参数写入完成", state="done")
+        time.sleep(0.05)
         return {
             "ok": True,
             "device": {"name": device.name, "ip": device.ip},

@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from asiairbridge.config import Device, DeviceEndpoint
-from asiairbridge.rpc import asiair_device_rpc, asiair_rpc
+from asiairbridge.rpc import asiair_device_rpc, asiair_device_rpc_batch, asiair_rpc, asiair_rpc_batch
 
 
 class FakeSocket:
@@ -76,6 +76,46 @@ class RpcEndpointTests(unittest.TestCase):
                 asiair_rpc("192.168.8.10", "test_connection", timeout_seconds=1.0)
 
         self.assertTrue(fake.timeouts)
+
+    def test_rpc_batch_returns_aligned_responses(self) -> None:
+        fake = FakeSocket(
+            [
+                (
+                    b'{"jsonrpc":"2.0","id":90000,"method":"set_a","code":0}\n'
+                    b'{"jsonrpc":"2.0","id":90001,"method":"set_b","code":0}\n'
+                )
+            ]
+        )
+        with patch("asiairbridge.rpc.socket.create_connection", return_value=fake):
+            responses = asiair_rpc_batch(
+                "192.168.8.10",
+                [("set_a", [1]), ("set_b", [2])],
+                timeout_seconds=1.0,
+            )
+
+        self.assertEqual([item and item["method"] for item in responses], ["set_a", "set_b"])
+        self.assertEqual(len(fake.sent), 2)
+
+    def test_device_rpc_batch_write_uses_first_endpoint_only(self) -> None:
+        device = Device(
+            name="pier-a",
+            ip="192.168.8.10",
+            endpoints=(
+                DeviceEndpoint("wired", "192.168.8.10", priority=0),
+                DeviceEndpoint("wifi-bridge", "192.168.8.20", priority=10),
+            ),
+        )
+        calls: list[str] = []
+
+        def fake_batch(ip: str, *args, **kwargs):  # type: ignore[no-untyped-def]
+            calls.append(ip)
+            raise TimeoutError("offline")
+
+        with patch("asiairbridge.rpc.asiair_rpc_batch", side_effect=fake_batch):
+            with self.assertRaises(TimeoutError):
+                asiair_device_rpc_batch(device, [("set_a", [1])], priority="write")
+
+        self.assertEqual(calls, ["192.168.8.10"])
 
 
 if __name__ == "__main__":

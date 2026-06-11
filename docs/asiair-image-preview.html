@@ -51,7 +51,7 @@
       height: 100dvh;
       min-height: 0;
       display: grid;
-      grid-template-rows: 54px minmax(0, 1fr) 42px;
+      grid-template-rows: 54px minmax(0, 1fr) auto;
       overflow: hidden;
     }
 
@@ -619,28 +619,42 @@
     .footer {
       border-top: 1px solid var(--line);
       display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      grid-template-rows: auto 34px;
-      align-items: stretch;
+      grid-template-columns: auto auto auto minmax(0, 1fr) auto;
+      align-items: center;
       min-width: 0;
       background: #020303;
     }
 
     .logline {
+      grid-column: 1;
+      grid-row: 1;
       min-width: 0;
       overflow: hidden;
-      display: flex;
-      align-items: center;
+      display: grid;
+      grid-template-columns: 60px 190px;
       gap: 14px;
+      align-items: center;
       padding: 0 10px;
       font: 700 12px var(--mono);
       color: var(--muted);
       white-space: nowrap;
     }
 
+    #status-text { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+    #status-age {
+      grid-column: 3;
+      grid-row: 1;
+      font: 700 12px var(--mono);
+      color: var(--text);
+      white-space: nowrap;
+      padding: 0 12px;
+    }
+
     .logline strong { color: var(--green); }
 
     .footer-actions {
+      grid-column: 5;
+      grid-row: 1;
       display: flex;
       align-items: center;
       gap: 8px;
@@ -648,19 +662,20 @@
     }
 
     .progress-row {
-      grid-column: 1 / -1;
+      grid-column: 2;
+      grid-row: 1;
       display: grid;
-      grid-template-columns: auto minmax(0, 1fr) auto;
+      grid-template-columns: 60px 220px 130px;
       gap: 10px;
       align-items: center;
-      padding: 0 10px 8px;
-      border-top: 1px solid var(--line-soft);
+      padding: 0 14px;
+      margin-left: 16px;
       min-width: 0;
     }
 
     .progress-label,
     .progress-value {
-      color: var(--muted);
+      color: var(--text);
       font: 700 12px var(--mono);
       white-space: nowrap;
     }
@@ -861,7 +876,6 @@
       <div class="logline">
         <span id="status-kind">[READY]</span>
         <strong id="status-text">等待取图或手动拉取</strong>
-        <span id="status-age">--</span>
       </div>
       <div class="footer-actions">
         <button id="open-monitor" type="button">返回总览</button>
@@ -871,6 +885,7 @@
         <div class="progress-track"><div class="progress-fill" id="exposure-progress-fill"></div></div>
         <span class="progress-value" id="exposure-progress-value">--</span>
       </div>
+      <span id="status-age">--</span>
     </footer>
   </main>
 
@@ -899,6 +914,11 @@
       editedFields: {},
       exposureTicker: null,
       exposureTrack: null,
+      captureProgress: null,
+      captureTimer: null,
+      captureLoading: false,
+      awaitingFrame: false,
+      awaitingSince: 0,
       operationProgress: null,
       operationPollTimer: null,
       rawValues: null,
@@ -1851,11 +1871,74 @@
       renderExposureProgress();
     }
 
+    async function loadCaptureProgress() {
+      if (!state.device || state.captureLoading) return;
+      state.captureLoading = true;
+      const prevWorking = !!(state.captureProgress && state.captureProgress.is_working);
+      try {
+        const response = await fetch(`/api/capture-progress?device=${encodeURIComponent(state.device)}`, { cache: "no-store" });
+        const payload = await response.json();
+        if (payload && payload.ok) state.captureProgress = payload;
+      } catch (err) {
+        /* transient network/RPC hiccup; keep last known value */
+      } finally {
+        state.captureLoading = false;
+      }
+      const nowWorking = !!(state.captureProgress && state.captureProgress.is_working);
+      if (prevWorking && !nowWorking) {
+        state.awaitingFrame = true;
+        state.awaitingSince = Date.now();
+        loadImage(true).catch(() => {});
+      }
+      renderExposureProgress();
+    }
+
     function renderExposureProgress() {
       const fill = $("exposure-progress-fill");
       const label = $("exposure-progress-label");
       const value = $("exposure-progress-value");
       if (!fill || !label || !value) return;
+      label.style.color = "";
+      const cp = state.captureProgress;
+      if (cp && cp.is_working) {
+        if (cp.state === "download") {
+          fill.classList.add("indeterminate");
+          label.textContent = "下载中";
+          label.style.color = "#35ff4f";
+          value.textContent = "写盘";
+          return;
+        }
+        const total = Number(cp.total_ms || 0);
+        const lapse = Number(cp.lapse_ms || 0);
+        const ratio = cp.progress != null ? Number(cp.progress) : (total > 0 ? Math.min(lapse / total, 1) : null);
+        if (ratio === null) {
+          fill.classList.add("indeterminate");
+          label.textContent = "曝光中";
+          label.style.color = "#00f5ff";
+          value.textContent = "进行中";
+          return;
+        }
+        fill.classList.remove("indeterminate");
+        fill.style.transform = "";
+        fill.style.width = `${clamp(ratio * 100, 0, 100)}%`;
+        if (ratio >= 1) {
+          label.textContent = "读出中";
+          label.style.color = "#ffb300";
+          value.textContent = `${(total / 1000).toFixed(1)}s`;
+        } else {
+          label.textContent = "曝光中";
+          label.style.color = "#00f5ff";
+          value.textContent = `${(lapse / 1000).toFixed(1)} / ${(total / 1000).toFixed(1)}s`;
+        }
+        return;
+      }
+      if (state.awaitingFrame && (Date.now() - state.awaitingSince) < 12000) {
+        fill.classList.add("indeterminate");
+        label.textContent = "出图中";
+        label.style.color = "#00f5ff";
+        value.textContent = "拉取";
+        return;
+      }
       const operation = state.operationProgress;
       if (operation && operation.state && operation.state !== "idle") {
         const step = Number(operation.step || 0);
@@ -1864,8 +1947,10 @@
         fill.classList.toggle("indeterminate", operation.state === "running" && step <= 0);
         fill.style.transform = "";
         fill.style.width = `${percent}%`;
-        label.textContent = `${operation.label || "正在执行"} ${step}/${total}`;
-        value.textContent = operation.state === "error" ? "异常" : operation.state === "done" ? "完成" : "进行中";
+        if (operation.state === "error") { label.textContent = "异常"; label.style.color = "#ff4f5e"; }
+        else if (operation.state === "done") { label.textContent = "完成"; label.style.color = "#35ff4f"; }
+        else { label.textContent = "执行中"; label.style.color = "#00f5ff"; }
+        value.textContent = `${step}/${total}`;
         return;
       }
       const track = state.exposureTrack;
@@ -2122,7 +2207,9 @@
         pair("拉伸", image.stretch ? `${image.stretch.low}-${image.stretch.high}` : "--")
       ].join("");
 
-      $("status-age").textContent = fmtAge(payload.age_seconds);
+      const ageText = fmtAge(payload.age_seconds);
+      $("status-age").textContent = ageText === "--" ? "--" : ageText + "前刷新";
+      $("status-age").style.color = (payload.age_seconds != null && payload.age_seconds > 60) ? "#ffb300" : "";
       setStatus(payload.refreshed ? "OK" : "CACHE", payload.refreshed ? "已从设备拉取最新图像" : "显示上次取图结果", payload.refreshed ? "ok" : "warn");
     }
 
@@ -2141,6 +2228,7 @@
         renderPayload({ ok: false, error: error.message || String(error), device: { name: state.device } });
       } finally {
         state.busy = false;
+        state.awaitingFrame = false;
         $("refresh-btn").disabled = false;
       }
     }
@@ -2347,6 +2435,8 @@
       setInterval(setClock, 1000);
       state.exposureTicker = setInterval(renderExposureProgress, 200);
       state.cameraTimer = setInterval(loadCameraStates, 3000);
+      state.captureTimer = setInterval(loadCaptureProgress, 1000);
+      loadCaptureProgress().catch(() => {});
       startControlPolling();
       refreshControlLease().catch(() => {});
       syncCameraControlAvailability();

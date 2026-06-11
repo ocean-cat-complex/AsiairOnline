@@ -14,7 +14,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from .camera_cache import CameraStateCache
-from .camera_ops import camera_action_response, camera_status_response
+from .camera_ops import camera_action_response, camera_status_response, capture_progress_response
 from .config import AppConfig, load_config
 from .image_preview import cached_image_path, cached_raw_path, current_image_response
 from .materials import MaterialLibrary
@@ -163,6 +163,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         focus_category=category,
                     )
                 )
+            elif parsed.path == "/api/capture-progress":
+                query = parse_qs(parsed.query)
+                device = query.get("device", [None])[0]
+                self._send_json(capture_progress_response(self.server.config, device))
             elif parsed.path == "/api/current-image":
                 query = parse_qs(parsed.query)
                 device = query.get("device", [None])[0]
