@@ -6,7 +6,7 @@ from typing import Any, Callable
 
 from .config import AppConfig, Device
 from .image_preview import current_image_response
-from .rpc import IMAGER_PORT, asiair_device_rpc, asiair_device_rpc_batch
+from .rpc import GUIDER_PORT, IMAGER_PORT, asiair_device_rpc, asiair_device_rpc_batch
 from .web_control import control_state
 
 ControlSpec = dict[str, Any]
@@ -50,6 +50,16 @@ STATUS_CONTROL_RPC_NAMES: dict[str, str] = {
     "fan_half_speed": "FanHalfSpeed",
     "led_on": "LedOn",
 }
+
+MOUNT_STATUS_METHODS: tuple[str, ...] = (
+    "scope_get_ra_dec",
+    "scope_get_track_state",
+    "scope_get_track_mode",
+    "scope_get_slew_rate",
+    "scope_is_moving",
+    "scope_get_pierside",
+    "scope_get_location",
+)
 
 
 def camera_status_response(
@@ -101,6 +111,16 @@ def camera_status_response(
     camera_state = rpc("get_camera_state") or {}
     camera_info = rpc("get_camera_info") or {}
     exp_bin = rpc("get_camera_exp_and_bin") or {}
+
+    mount_budget_seconds = max(0.0, min(2.0, status_budget_seconds - (time.perf_counter() - started)))
+    mount = _mount_status_response(
+        device,
+        rpc_timeout_seconds=min(rpc_timeout_seconds, 1.5),
+        queue_timeout_seconds=queue_timeout_seconds,
+        budget_seconds=mount_budget_seconds,
+        priority=priority,
+    )
+
     controls = rpc("get_controls") or []
     sixteen_bit = rpc("get_camera_16bit")
     subframe = rpc("get_subframe") or {}
@@ -165,6 +185,7 @@ def camera_status_response(
             "bin": exp_bin.get("bin") if isinstance(exp_bin, dict) else None,
         },
         "controls": control_values,
+        "mount": mount,
         "subframe": {
             "width": subframe.get("width") if isinstance(subframe, dict) else None,
             "height": subframe.get("height") if isinstance(subframe, dict) else None,
@@ -182,6 +203,155 @@ def camera_status_response(
             "bin": image_info.get("bin") if isinstance(image_info, dict) else None,
         },
     }
+
+
+def _mount_status_response(
+    device: Device,
+    *,
+    rpc_timeout_seconds: float,
+    queue_timeout_seconds: float,
+    budget_seconds: float,
+    priority: str,
+) -> dict[str, Any]:
+    started = time.perf_counter()
+    request_id = 71_000
+    errors: list[dict[str, Any]] = []
+    results: dict[str, Any] = {}
+
+    for method in MOUNT_STATUS_METHODS:
+        if time.perf_counter() - started > budget_seconds:
+            errors.append({"method": method, "error": "mount status refresh budget exceeded"})
+            break
+        request_id += 1
+        try:
+            response = asiair_device_rpc(
+                device,
+                method,
+                request_id=request_id,
+                port=GUIDER_PORT,
+                timeout_seconds=rpc_timeout_seconds,
+                priority=priority,
+                queue_timeout_seconds=queue_timeout_seconds,
+            )
+        except Exception as exc:  # noqa: BLE001
+            errors.append({"method": method, "error": str(exc)})
+            continue
+        if response.get("code") != 0:
+            error: dict[str, Any] = {"method": method, "code": response.get("code")}
+            if response.get("error"):
+                error["error"] = response.get("error")
+            errors.append(error)
+            continue
+        results[method] = response.get("result")
+
+    ra_dec = results.get("scope_get_ra_dec")
+    track_mode = _choice_snapshot(results.get("scope_get_track_mode"))
+    slew_rate = _choice_snapshot(results.get("scope_get_slew_rate"))
+    location = results.get("scope_get_location")
+    ra_hours = _float_at(ra_dec, 0)
+    dec_degrees = _float_at(ra_dec, 1)
+    latitude = _float_at(location, 0)
+    longitude = _float_at(location, 1)
+    track_state = results.get("scope_get_track_state")
+    moving = results.get("scope_is_moving")
+    pier_side = results.get("scope_get_pierside")
+    available = any(
+        _has_mount_value(value)
+        for value in (
+            ra_hours,
+            dec_degrees,
+            track_state,
+            track_mode.get("value"),
+            slew_rate.get("value"),
+            moving,
+            pier_side,
+            latitude,
+            longitude,
+        )
+    )
+
+    return {
+        "available": available,
+        "port": GUIDER_PORT,
+        "ra_hours": ra_hours,
+        "dec_degrees": dec_degrees,
+        "ra_text": _format_ra_hours(ra_hours),
+        "dec_text": _format_dec_degrees(dec_degrees),
+        "raw_ra_dec": ra_dec if isinstance(ra_dec, list) else None,
+        "track_enabled": track_state if isinstance(track_state, bool) else None,
+        "track_mode": track_mode,
+        "slew_rate": slew_rate,
+        "moving": moving,
+        "pier_side": pier_side,
+        "location": {
+            "latitude": latitude,
+            "longitude": longitude,
+        },
+        "errors": errors,
+    }
+
+
+def _choice_snapshot(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {"value": value, "index": None, "list": []}
+    choices = value.get("list")
+    if not isinstance(choices, list):
+        choices = []
+    index = value.get("index")
+    selected = None
+    try:
+        index_int = int(index)
+    except (TypeError, ValueError):
+        index_int = None
+    if index_int is not None and 0 <= index_int < len(choices):
+        selected = choices[index_int]
+    return {
+        "value": selected,
+        "index": index_int,
+        "list": choices,
+    }
+
+
+def _float_at(value: Any, index: int) -> float | None:
+    if not isinstance(value, (list, tuple)) or index >= len(value):
+        return None
+    try:
+        return float(value[index])
+    except (TypeError, ValueError):
+        return None
+
+
+def _has_mount_value(value: Any) -> bool:
+    if value is None or value == "":
+        return False
+    if isinstance(value, (list, dict)):
+        return bool(value)
+    return True
+
+
+def _format_ra_hours(value: Any) -> str | None:
+    try:
+        hours_float = float(value) % 24.0
+    except (TypeError, ValueError):
+        return None
+    total_tenths = int(round(hours_float * 36000))
+    hours = (total_tenths // 36000) % 24
+    minutes = (total_tenths % 36000) // 600
+    seconds = (total_tenths % 600) / 10.0
+    return f"{hours:02d}h {minutes:02d}m {seconds:04.1f}s"
+
+
+def _format_dec_degrees(value: Any) -> str | None:
+    try:
+        degrees_float = float(value)
+    except (TypeError, ValueError):
+        return None
+    sign = "-" if degrees_float < 0 else "+"
+    total_tenths = int(round(abs(degrees_float) * 36000))
+    degrees = total_tenths // 36000
+    minutes = (total_tenths % 36000) // 600
+    seconds = (total_tenths % 600) / 10.0
+    return f"{sign}{degrees:02d}° {minutes:02d}' {seconds:04.1f}\""
 
 
 def capture_progress_response(

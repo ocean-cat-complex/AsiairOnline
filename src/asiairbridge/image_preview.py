@@ -22,6 +22,12 @@ IMAGE_METHOD = "get_current_img"
 MAX_PACKET_BYTES = 192 * 1024 * 1024
 CACHE_MAX_AGE_SECONDS = 30.0
 PREVIEW_MAX_EDGE = 2400
+STF_HISTOGRAM_BINS = 4096
+STF_BLACK_CLIP_SIGMA = -2.8
+STF_TARGET_BACKGROUND = 0.25
+STF_WHITE_PERCENTILE = 0.9995
+STF_MIN_RANGE = 1.0 / 65535.0
+STF_STRETCH_ALGORITHM = "STF-style median/MAD + midtones transfer"
 
 _PREVIEW_LOCKS: dict[str, threading.Lock] = {}
 _PREVIEW_LOCKS_GUARD = threading.Lock()
@@ -66,6 +72,7 @@ def current_image_response(
     cached = _read_metadata(meta_path)
 
     if not force and cached and png_path.is_file():
+        cached = _restretch_cached_preview_if_needed(cached, raw_path, png_path, meta_path)
         return _metadata_response(device, cached, refreshed=False)
 
     if not force and not png_path.is_file():
@@ -80,6 +87,7 @@ def current_image_response(
     with _preview_lock(device.name):
         cached = _read_metadata(meta_path)
         if not force and cached and png_path.is_file():
+            cached = _restretch_cached_preview_if_needed(cached, raw_path, png_path, meta_path)
             return _metadata_response(device, cached, refreshed=False)
 
         frame = fetch_current_image(device)
@@ -97,6 +105,7 @@ def current_image_response(
             "endpoints": [endpoint.as_dict() for endpoint in device.endpoint_candidates()],
             "endpoint": frame.endpoint,
             "generated_at": generated_at,
+            "preview_generated_at": generated_at,
             "image": {
                 "width": preview.width,
                 "height": preview.height,
@@ -266,31 +275,33 @@ def normalize_raw16be(raw_data: bytes, bytes_per_pixel: int) -> bytes:
 
 def raw16_to_png(raw_data: bytes, width: int, height: int) -> tuple[bytes, dict[str, Any]]:
     high_byte_offset = _detect_high_byte_offset(raw_data)
-    high_bytes = raw_data[high_byte_offset::2]
-    histogram = [0] * 256
-    for value in high_bytes:
-        histogram[value] += 1
+    total_pixels = width * height
+    if len(raw_data) < total_pixels * 2:
+        raise ValueError("raw_data is shorter than the requested image dimensions")
 
-    total = len(high_bytes)
-    low = _hist_percentile(histogram, total, 0.01)
-    high = _hist_percentile(histogram, total, 0.995)
-    if high <= low:
-        low, high = min(high_bytes), max(high_bytes)
-    if high <= low:
-        pixels = bytes(255 if value >= high else 0 for value in high_bytes)
-    else:
-        scale = 255.0 / (high - low)
-        pixels = bytes(
-            0 if value <= low else 255 if value >= high else int((value - low) * scale)
-            for value in high_bytes
-        )
+    histogram = _raw16_histogram(raw_data, total_pixels, high_byte_offset, STF_HISTOGRAM_BINS)
+    stretch = _stf_stretch_from_histogram(histogram, total_pixels, STF_HISTOGRAM_BINS)
+    lut = _stf_lut(stretch)
+    pixels = _apply_raw16_lut(raw_data, total_pixels, high_byte_offset, lut)
 
     return _png_grayscale(width, height, pixels), {
-        "source": "16-bit mono high byte",
+        "source": "16-bit mono",
+        "algorithm": STF_STRETCH_ALGORITHM,
         "byte_order": "little" if high_byte_offset == 1 else "big",
-        "low": low,
-        "high": high,
-        "percentiles": "1%-99.5%",
+        "low": round(stretch["black"] * 65535),
+        "high": round(stretch["white"] * 65535),
+        "black": round(stretch["black"] * 65535),
+        "white": round(stretch["white"] * 65535),
+        "median": round(stretch["median"] * 65535),
+        "mad": round(stretch["mad"] * 65535),
+        "sigma": round(stretch["sigma"] * 65535),
+        "midtone": stretch["midtone"],
+        "source_background": stretch["source_background"],
+        "target_background": STF_TARGET_BACKGROUND,
+        "black_clip_sigma": STF_BLACK_CLIP_SIGMA,
+        "white_percentile": STF_WHITE_PERCENTILE,
+        "histogram_bins": STF_HISTOGRAM_BINS,
+        "percentiles": "STF median/MAD; white 99.95%",
     }
 
 
@@ -358,6 +369,133 @@ def _hist_percentile(histogram: list[int], total: int, percentile: float) -> int
     return len(histogram) - 1
 
 
+def _raw16_histogram(raw_data: bytes, total_pixels: int, high_byte_offset: int, bins: int) -> list[int]:
+    histogram = [0] * bins
+    for pair_start in range(0, total_pixels * 2, 2):
+        if high_byte_offset == 0:
+            value = (raw_data[pair_start] << 8) | raw_data[pair_start + 1]
+        else:
+            value = (raw_data[pair_start + 1] << 8) | raw_data[pair_start]
+        histogram[min(bins - 1, (value * bins) >> 16)] += 1
+    return histogram
+
+
+def _stf_stretch_from_histogram(histogram: list[int], total: int, bins: int) -> dict[str, float]:
+    median = _hist_percentile_normalized(histogram, total, 0.5, bins)
+    mad = _hist_mad_normalized(histogram, total, median, bins)
+    sigma = 1.4826 * mad
+
+    if sigma > 0:
+        black = max(0.0, min(0.98, median + (STF_BLACK_CLIP_SIGMA * sigma)))
+    else:
+        black = _hist_percentile_normalized(histogram, total, 0.001, bins)
+
+    white = _hist_percentile_normalized(histogram, total, STF_WHITE_PERCENTILE, bins)
+    if not _finite_number(white) or white <= black + STF_MIN_RANGE:
+        white = _hist_percentile_normalized(histogram, total, 0.9999, bins)
+    if not _finite_number(white) or white <= black + STF_MIN_RANGE:
+        white = 1.0
+
+    source_background = _clamp((median - black) / max(STF_MIN_RANGE, white - black), 0.001, 0.999)
+    midtone = _midtone_for_target(STF_TARGET_BACKGROUND, source_background)
+    return {
+        "black": _clamp(black, 0.0, 0.999),
+        "white": _clamp(white, black + STF_MIN_RANGE, 1.0),
+        "median": _clamp(median, 0.0, 1.0),
+        "mad": max(0.0, mad),
+        "sigma": max(0.0, sigma),
+        "source_background": source_background,
+        "midtone": midtone,
+    }
+
+
+def _hist_percentile_normalized(histogram: list[int], total: int, percentile: float, bins: int) -> float:
+    threshold = max(1, int(total * percentile))
+    running = 0
+    for index, count in enumerate(histogram):
+        running += count
+        if running >= threshold:
+            return (index + 0.5) / bins
+    return 1.0
+
+
+def _hist_mad_normalized(histogram: list[int], total: int, median: float, bins: int) -> float:
+    median_bin = min(bins - 1, max(0, round(median * (bins - 1))))
+    threshold = max(1, int(total * 0.5))
+    running = histogram[median_bin]
+    for distance in range(1, bins):
+        left = median_bin - distance
+        right = median_bin + distance
+        if left >= 0:
+            running += histogram[left]
+        if right < bins:
+            running += histogram[right]
+        if running >= threshold:
+            return distance / bins
+    return 0.0
+
+
+def _stf_lut(stretch: dict[str, float]) -> bytes:
+    black = stretch["black"]
+    white = stretch["white"]
+    midtone = stretch["midtone"]
+    inv_range = 1.0 / max(STF_MIN_RANGE, white - black)
+    lut = bytearray(65536)
+    for value in range(65536):
+        normalized = ((value / 65535.0) - black) * inv_range
+        if normalized <= 0:
+            output = 0
+        elif normalized >= 1:
+            output = 255
+        else:
+            output = round(_midtone_transfer(midtone, normalized) * 255)
+        lut[value] = min(255, max(0, output))
+    return bytes(lut)
+
+
+def _apply_raw16_lut(raw_data: bytes, total_pixels: int, high_byte_offset: int, lut: bytes) -> bytes:
+    pixels = bytearray(total_pixels)
+    out_index = 0
+    for pair_start in range(0, total_pixels * 2, 2):
+        if high_byte_offset == 0:
+            value = (raw_data[pair_start] << 8) | raw_data[pair_start + 1]
+        else:
+            value = (raw_data[pair_start + 1] << 8) | raw_data[pair_start]
+        pixels[out_index] = lut[value]
+        out_index += 1
+    return bytes(pixels)
+
+
+def _midtone_for_target(target: float, source: float) -> float:
+    target = _clamp(target, 0.001, 0.999)
+    source = _clamp(source, 0.001, 0.999)
+    denominator = target + source - (2 * target * source)
+    if abs(denominator) < 1e-12:
+        return 0.5
+    return _clamp((source * (1 - target)) / denominator, 0.001, 0.999)
+
+
+def _midtone_transfer(midtone: float, value: float) -> float:
+    midtone = _clamp(midtone, 0.001, 0.999)
+    value = _clamp(value, 0.0, 1.0)
+    if value <= 0:
+        return 0.0
+    if value >= 1:
+        return 1.0
+    denominator = (((2 * midtone) - 1) * value) - midtone
+    if abs(denominator) < 1e-12:
+        return 0.0
+    return _clamp(((midtone - 1) * value) / denominator, 0.0, 1.0)
+
+
+def _clamp(value: float, lower: float, upper: float) -> float:
+    return min(max(float(value), lower), upper)
+
+
+def _finite_number(value: float) -> bool:
+    return value == value and value not in (float("inf"), float("-inf"))
+
+
 def _detect_high_byte_offset(raw_data: bytes) -> int:
     even_hist = [0] * 256
     odd_hist = [0] * 256
@@ -382,9 +520,10 @@ def _metadata_response(device: Device, metadata: dict[str, Any], refreshed: bool
     payload["endpoints"] = [endpoint.as_dict() for endpoint in device.endpoint_candidates()]
     payload["refreshed"] = refreshed
     generated_at = payload.get("generated_at")
+    preview_generated_at = payload.get("preview_generated_at")
     payload["age_seconds"] = _age_seconds(generated_at)
     if generated_at:
-        payload["image_url"] = _image_url(device, str(generated_at))
+        payload["image_url"] = _image_url(device, str(preview_generated_at or generated_at))
         payload["raw_url"] = _raw_url(device, str(generated_at))
     return payload
 
@@ -418,6 +557,64 @@ def _read_metadata(path: Path) -> dict[str, Any] | None:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
+
+
+def _restretch_cached_preview_if_needed(
+    metadata: dict[str, Any],
+    raw_path: Path,
+    png_path: Path,
+    meta_path: Path,
+) -> dict[str, Any]:
+    if _metadata_uses_current_stretch(metadata):
+        return metadata
+    if not raw_path.is_file():
+        return metadata
+
+    image = metadata.get("image")
+    if not isinstance(image, dict):
+        return metadata
+    try:
+        width = int(image.get("width") or 0)
+        height = int(image.get("height") or 0)
+    except (TypeError, ValueError):
+        return metadata
+    if width <= 0 or height <= 0:
+        return metadata
+
+    try:
+        raw_data = raw_path.read_bytes()
+        png_bytes, stretch = raw16_to_png(raw_data, width, height)
+        png_path.write_bytes(png_bytes)
+    except (OSError, ValueError):
+        return metadata
+
+    updated = dict(metadata)
+    updated_image = dict(image)
+    updated_image["png_bytes"] = len(png_bytes)
+    updated_image["source_byte_order"] = stretch.get("byte_order")
+    updated_image["stretch"] = stretch
+    updated["image"] = updated_image
+    updated["preview_generated_at"] = datetime.now().isoformat(timespec="seconds")
+    try:
+        meta_path.write_text(json.dumps(updated, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError:
+        return metadata
+    return updated
+
+
+def _metadata_uses_current_stretch(metadata: dict[str, Any]) -> bool:
+    image = metadata.get("image")
+    if not isinstance(image, dict):
+        return False
+    stretch = image.get("stretch")
+    if not isinstance(stretch, dict):
+        return False
+    if not isinstance(metadata.get("preview_generated_at"), str):
+        return False
+    return (
+        stretch.get("algorithm") == STF_STRETCH_ALGORITHM
+        and stretch.get("histogram_bins") == STF_HISTOGRAM_BINS
+    )
 
 
 def _preview_lock(device_name: str) -> threading.Lock:

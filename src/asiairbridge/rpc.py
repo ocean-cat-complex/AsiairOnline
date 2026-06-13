@@ -283,6 +283,8 @@ READONLY_HARDWARE_METHODS: tuple[RpcProbeMethod, ...] = (
     RpcProbeMethod("scope_get_location", "mount"),
     RpcProbeMethod("scope_get_pierside", "mount"),
     RpcProbeMethod("scope_get_track_state", "mount"),
+    RpcProbeMethod("scope_get_track_mode", "mount"),
+    RpcProbeMethod("scope_get_slew_rate", "mount"),
     RpcProbeMethod("scope_get_target_pierside", "mount"),
     RpcProbeMethod("scope_is_moving", "mount"),
     RpcProbeMethod("get_connected_focuser", "focuser"),

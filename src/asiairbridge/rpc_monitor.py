@@ -98,6 +98,14 @@ MONITOR_CALLS: tuple[MonitorCall, ...] = (
     MonitorCall("get_wheel_position", "filter_wheel", "滤轮位置", interval_seconds=5, priority=36),
     MonitorCall("get_wheel_slot_name", "filter_wheel", "滤轮槽位名称", interval_seconds=30, priority=36),
     MonitorCall("get_wheel_setting", "filter_wheel", "滤轮设置", interval_seconds=30, priority=36),
+    MonitorCall("scope_get_ra_dec", "mount", "RA / Dec 指向", port=GUIDER_PORT, interval_seconds=3, priority=37),
+    MonitorCall("scope_get_track_state", "mount", "跟踪开关", port=GUIDER_PORT, interval_seconds=3, priority=37),
+    MonitorCall("scope_get_track_mode", "mount", "跟踪模式", port=GUIDER_PORT, interval_seconds=5, priority=38),
+    MonitorCall("scope_get_slew_rate", "mount", "手动移动速率", port=GUIDER_PORT, interval_seconds=5, priority=38),
+    MonitorCall("scope_is_moving", "mount", "移动状态", port=GUIDER_PORT, interval_seconds=3, priority=38),
+    MonitorCall("scope_get_pierside", "mount", "赤道仪方位", port=GUIDER_PORT, interval_seconds=10, priority=39),
+    MonitorCall("scope_get_location", "mount", "经纬度", port=GUIDER_PORT, interval_seconds=30, priority=39),
+    MonitorCall("scope_get_cap", "mount", "赤道仪能力", port=GUIDER_PORT, interval_seconds=30, priority=39),
     MonitorCall("get_dither", "guiding", "Dither 设置", interval_seconds=20, priority=40),
     MonitorCall("get_flip_calibration", "guiding", "翻转校准状态", port=GUIDER_PORT, interval_seconds=20, priority=40),
     MonitorCall("get_stack_info", "stacking", "叠加信息", interval_seconds=15, priority=45),
@@ -1301,6 +1309,8 @@ def _display_fields(call: MonitorCall, result: Any, ok: bool) -> dict[str, Any]:
         return _focuser_display(method, result)
     if method.startswith("get_wheel") or method == "get_connected_wheels":
         return _wheel_display(method, result)
+    if method.startswith("scope_"):
+        return _mount_display(method, result)
     if method in {"get_dither", "get_flip_calibration"}:
         return {"display_value": _short_json(result), "display_detail": "导星相关只读状态"}
     if method.startswith("get_stack") or method.startswith("get_batch_stack") or method.startswith("get_calib"):
@@ -1862,6 +1872,95 @@ def _wheel_display(method: str, result: Any) -> dict[str, Any]:
     if isinstance(result, dict):
         return {"display_value": result.get("state") or _short_json(result), "display_detail": _short_json(result)}
     return {"display_value": str(result), "display_detail": "滤轮"}
+
+
+def _mount_display(method: str, result: Any) -> dict[str, Any]:
+    if method == "scope_get_ra_dec" and isinstance(result, list):
+        ra = _float_at(result, 0)
+        dec = _float_at(result, 1)
+        return {
+            "display_value": f"{_format_ra_hours(ra) or '-'} / {_format_dec_degrees(dec) or '-'}",
+            "display_detail": f"原始值 {_short_json(result)}",
+        }
+    if method == "scope_get_track_state":
+        return {"display_value": "开启" if bool(result) else "关闭", "display_detail": "跟踪开关"}
+    if method in {"scope_get_track_mode", "scope_get_slew_rate"}:
+        return {"display_value": _choice_display(result), "display_detail": _short_json(result)}
+    if method == "scope_is_moving":
+        moving = {
+            "none": "静止",
+            "ra": "RA 轴移动",
+            "dec": "Dec 轴移动",
+            "both": "双轴移动",
+        }.get(str(result).lower(), str(result))
+        return {"display_value": moving, "display_detail": "移动状态"}
+    if method == "scope_get_pierside":
+        pier = {
+            "pier_east": "东侧",
+            "pier_west": "西侧",
+            "east": "东侧",
+            "west": "西侧",
+        }.get(str(result).lower(), str(result))
+        return {"display_value": pier, "display_detail": "赤道仪方位"}
+    if method == "scope_get_location" and isinstance(result, list):
+        lat = _float_at(result, 0)
+        lon = _float_at(result, 1)
+        return {
+            "display_value": f"{lat:.4f}, {lon:.4f}" if lat is not None and lon is not None else _short_json(result),
+            "display_detail": "纬度, 经度",
+        }
+    if method == "scope_get_cap" and isinstance(result, list):
+        return {"display_value": f"{len(result)} 项能力", "display_detail": ", ".join(str(item) for item in result[:8])}
+    return {"display_value": _short_json(result), "display_detail": "赤道仪"}
+
+
+def _choice_display(value: Any) -> str:
+    if not isinstance(value, dict):
+        return _short_json(value)
+    choices = value.get("list")
+    index = value.get("index")
+    if isinstance(choices, list):
+        try:
+            index_int = int(index)
+        except (TypeError, ValueError):
+            index_int = None
+        if index_int is not None and 0 <= index_int < len(choices):
+            return str(choices[index_int])
+    return _short_json(value)
+
+
+def _float_at(value: Any, index: int) -> float | None:
+    if not isinstance(value, (list, tuple)) or index >= len(value):
+        return None
+    try:
+        return float(value[index])
+    except (TypeError, ValueError):
+        return None
+
+
+def _format_ra_hours(value: Any) -> str | None:
+    try:
+        hours_float = float(value) % 24.0
+    except (TypeError, ValueError):
+        return None
+    total_tenths = int(round(hours_float * 36000))
+    hours = (total_tenths // 36000) % 24
+    minutes = (total_tenths % 36000) // 600
+    seconds = (total_tenths % 600) / 10.0
+    return f"{hours:02d}h {minutes:02d}m {seconds:04.1f}s"
+
+
+def _format_dec_degrees(value: Any) -> str | None:
+    try:
+        degrees_float = float(value)
+    except (TypeError, ValueError):
+        return None
+    sign = "-" if degrees_float < 0 else "+"
+    total_tenths = int(round(abs(degrees_float) * 36000))
+    degrees = total_tenths // 36000
+    minutes = (total_tenths % 36000) // 600
+    seconds = (total_tenths % 600) / 10.0
+    return f"{sign}{degrees:02d}° {minutes:02d}' {seconds:04.1f}\""
 
 
 def _network_summary(method: str, result: Any) -> str:

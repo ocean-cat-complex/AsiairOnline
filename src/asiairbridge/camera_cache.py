@@ -10,6 +10,7 @@ from typing import Any
 
 from .camera_ops import camera_status_response
 from .config import AppConfig, Device
+from .rpc import GUIDER_PORT
 from .web_control import control_state
 
 
@@ -196,8 +197,10 @@ def _merge_payload(previous: dict[str, Any] | None, current: dict[str, Any]) -> 
     if previous is None:
         return copy.deepcopy(current)
     merged = copy.deepcopy(current)
-    for key in ("app", "camera", "exposure", "controls", "subframe", "image"):
+    for key in ("app", "camera", "exposure", "controls", "mount", "subframe", "image"):
         merged[key] = _merge_non_empty(previous.get(key), current.get(key))
+    if isinstance(merged.get("mount"), dict) and isinstance(current.get("mount"), dict):
+        merged["mount"]["errors"] = copy.deepcopy(current["mount"].get("errors") or [])
     return merged
 
 
@@ -257,6 +260,22 @@ def _empty_payload(config: AppConfig, device: Device, error: str) -> dict[str, A
         },
         "exposure": {"us": None, "seconds": None, "bin": None},
         "controls": {},
+        "mount": {
+            "available": False,
+            "port": GUIDER_PORT,
+            "ra_hours": None,
+            "dec_degrees": None,
+            "ra_text": None,
+            "dec_text": None,
+            "raw_ra_dec": None,
+            "track_enabled": None,
+            "track_mode": {"value": None, "index": None, "list": []},
+            "slew_rate": {"value": None, "index": None, "list": []},
+            "moving": None,
+            "pier_side": None,
+            "location": {"latitude": None, "longitude": None},
+            "errors": [{"method": "camera_cache", "error": error}],
+        },
         "subframe": {"width": None, "height": None, "x": None, "y": None},
         "image": {
             "generated_at": None,

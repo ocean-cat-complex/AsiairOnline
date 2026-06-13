@@ -866,6 +866,10 @@
           <div class="pairs" id="camera-meta"></div>
         </section>
         <section class="panel">
+          <div class="panel-head"><span>赤道仪状态</span><span id="mount-head">--</span></div>
+          <div class="pairs" id="mount-meta"></div>
+        </section>
+        <section class="panel">
           <div class="panel-head"><span>当前帧</span><span id="image-id">--</span></div>
           <div class="pairs" id="image-meta"></div>
         </section>
@@ -977,6 +981,26 @@
       error: "异常"
     };
 
+    const TRACK_MODE_LABELS = {
+      sidereal: "恒星时",
+      solar: "太阳",
+      lunar: "月球"
+    };
+
+    const PIER_SIDE_LABELS = {
+      pier_east: "东侧",
+      pier_west: "西侧",
+      east: "东侧",
+      west: "西侧"
+    };
+
+    const MOVING_LABELS = {
+      none: "静止",
+      ra: "RA 轴移动",
+      dec: "Dec 轴移动",
+      both: "双轴移动"
+    };
+
     const SEQUENCE_LABELS = {
       light: "亮场",
       dark: "暗场",
@@ -1077,6 +1101,34 @@
       const n = Number(value);
       if (!Number.isFinite(n)) return "--";
       return n < 60 ? `${n.toFixed(1)}s` : `${Math.floor(n / 60)}m ${Math.round(n % 60)}s`;
+    }
+
+    function choiceLabel(choice, labels = {}) {
+      if (!choice || typeof choice !== "object") return fmt(choice);
+      const value = choice.value;
+      return mapLabel(labels, value);
+    }
+
+    function mountTrackLabel(value) {
+      if (value === true) return "开启";
+      if (value === false) return "关闭";
+      return "--";
+    }
+
+    function mountLocationText(location) {
+      if (!location || typeof location !== "object") return "--";
+      const lat = Number(location.latitude);
+      const lon = Number(location.longitude);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return "--";
+      return `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+    }
+
+    function mountErrorText(errors) {
+      if (!Array.isArray(errors) || !errors.length) return "不可用";
+      const first = errors[0] || {};
+      if (first.code === 103) return "未连接或未打开";
+      if (first.code !== undefined && first.code !== null) return `RPC ${first.code}`;
+      return first.error || "不可用";
     }
 
     function clamp(value, min, max) {
@@ -2023,8 +2075,48 @@
         pair("16 Bit", camera.sixteen_bit ? "On" : "Off", camera.sixteen_bit ? "ok" : "warn")
       ].join("");
 
+      renderMountStatus(payload.mount);
       updateExposureProgress(payload);
       syncCameraControlAvailability();
+    }
+
+    function renderMountStatus(mount) {
+      const head = $("mount-head");
+      const meta = $("mount-meta");
+      if (!head || !meta) return;
+      if (!mount || typeof mount !== "object") {
+        head.textContent = "不可用";
+        head.style.color = "#ff4f5e";
+        meta.innerHTML = pair("状态", "无赤道仪数据", "warn");
+        return;
+      }
+
+      const available = Boolean(mount.available);
+      const tracking = mount.track_enabled;
+      if (tracking === true) {
+        head.textContent = "跟踪中";
+        head.style.color = "#35ff4f";
+      } else if (tracking === false) {
+        head.textContent = available ? "未跟踪" : "不可用";
+        head.style.color = available ? "#ffb300" : "#ff4f5e";
+      } else {
+        head.textContent = available ? "在线" : "不可用";
+        head.style.color = available ? "#00f5ff" : "#ff4f5e";
+      }
+
+      const movingText = mapLabel(MOVING_LABELS, mount.moving);
+      const movingClass = String(mount.moving || "").toLowerCase() === "none" ? "ok" : "warn";
+      const rows = [];
+      if (!available) rows.push(pair("状态", mountErrorText(mount.errors), "warn"));
+      rows.push(pair("RA", mount.ra_text || fmt(mount.ra_hours, "h")));
+      rows.push(pair("Dec", mount.dec_text || fmt(mount.dec_degrees, "°")));
+      rows.push(pair("跟踪", mountTrackLabel(tracking), tracking === true ? "ok" : "warn"));
+      rows.push(pair("跟踪模式", choiceLabel(mount.track_mode, TRACK_MODE_LABELS)));
+      rows.push(pair("移动速率", choiceLabel(mount.slew_rate)));
+      rows.push(pair("移动状态", movingText, movingClass));
+      rows.push(pair("方位", mapLabel(PIER_SIDE_LABELS, mount.pier_side)));
+      rows.push(pair("站点", mountLocationText(mount.location)));
+      meta.innerHTML = rows.join("");
     }
 
     async function loadCameraState() {
@@ -2039,6 +2131,7 @@
       } catch (error) {
         $("camera-head").textContent = "异常";
         $("camera-meta").innerHTML = pair("状态", error.message || String(error), "err");
+        renderMountStatus({ available: false, errors: [{ error: error.message || String(error) }] });
         state.lastCameraState = null;
         syncCameraControlAvailability();
       }
@@ -2064,6 +2157,7 @@
         if (!renderSelectedCameraState()) {
           $("camera-head").textContent = "异常";
           $("camera-meta").innerHTML = pair("状态", error.message || String(error), "err");
+          renderMountStatus({ available: false, errors: [{ error: error.message || String(error) }] });
           state.lastCameraState = null;
           syncCameraControlAvailability();
         }
