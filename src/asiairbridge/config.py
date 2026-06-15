@@ -101,6 +101,9 @@ class ProjectSettings:
 class BackupSettings:
     dry_run_default: bool
     copy_empty_dirs: bool
+    retry_count: int
+    retry_wait_seconds: int
+    job_timeout_hours: int
     smb_port: int
     exclude_dirs: tuple[str, ...]
     exclude_files: tuple[str, ...]
@@ -226,6 +229,9 @@ def _parse_backup(raw: dict[str, Any]) -> BackupSettings:
     return BackupSettings(
         dry_run_default=bool(raw.get("dry_run_default", True)),
         copy_empty_dirs=bool(raw.get("copy_empty_dirs", True)),
+        retry_count=_int_in_range(raw, "retry_count", 2, 0, 1000),
+        retry_wait_seconds=_int_in_range(raw, "retry_wait_seconds", 5, 0, 86400),
+        job_timeout_hours=_int_in_range(raw, "job_timeout_hours", 6, 1, 24),
         smb_port=_int_in_range(raw, "smb_port", 445, 1, 65535),
         exclude_dirs=tuple(str(item) for item in raw.get("exclude_dirs", [])),
         exclude_files=tuple(str(item) for item in raw.get("exclude_files", [])),

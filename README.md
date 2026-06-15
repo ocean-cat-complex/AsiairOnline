@@ -5,7 +5,8 @@ ASIAIR monitoring and backup sidecar for macOS hosts on the same Tailscale or pr
 This macOS branch provides:
 
 - Live ASIAIR JSON-RPC monitoring with endpoint failover.
-- Current-image preview and guarded camera controls.
+- Current-image preview, guarded camera controls, and read-only mount status.
+- The newer ASIAIR OPS pages with shared navigation for overview, camera, mount, and materials.
 - Local material index backed by the configured backup destination.
 - Incremental, dry-run-by-default backup from mounted ASIAIR SMB shares.
 - A three-device model where each physical ASIAIR can expose multiple network endpoints.
@@ -52,7 +53,7 @@ Start the web service on localhost:
 PYTHON=/opt/homebrew/bin/python3.13 ./scripts/start-web.sh
 ```
 
-Open `http://127.0.0.1:8787/`; the root URL lands on the live monitor.
+Open `http://127.0.0.1:8787/`; the root URL lands on the OPS overview.
 
 Expose it to other machines in the tailnet only when needed:
 
@@ -64,11 +65,13 @@ HOST=0.0.0.0 PYTHON=/opt/homebrew/bin/python3.13 ./scripts/start-web.sh
 
 | Path | Page |
 | --- | --- |
-| `/` or `/monitor-minterm` | Live device monitor, the MINTERM ops console |
+| `/` or `/monitor-minterm` | OPS overview / live monitor |
 | `/camera` | Current-image preview, camera status, exposure controls, and control lease actions |
+| `/mount` | Read-only equatorial mount status and sky/mount visualization |
+| `/mount-classic` | Classic mount visualization kept as a fallback |
 | `/materials` | Local material library browser |
 
-The old backup-console landing page and legacy `/monitor` page are removed. The `/api/*` JSON endpoints, including `/api/status`, `/api/devices`, `/api/rpc-monitor`, `/api/materials/*`, and camera APIs, remain available.
+The old backup-console landing page and legacy `/monitor` page are removed. The `/api/*` JSON endpoints, including `/api/status`, `/api/devices`, `/api/rpc-monitor`, `/api/mount-state`, `/api/materials/*`, and camera APIs, remain available.
 
 ### Read-only vs. Writable
 
@@ -114,12 +117,14 @@ Keep ASIAIR, SMB, and Tailscale credentials outside the repository.
 ## Reliability
 
 - Backups are dry-run by default; a real copy requires `RUN_BACKUP=1` or `--no-dry-run`.
+- SMB reachability checks retry briefly, and `rsync` jobs have a wall-clock timeout (`backup.job_timeout_hours`, default 6h).
 - A stale lock left by a crashed or killed backup is reclaimed automatically once its PID is confirmed dead.
 - `--force-lock` refuses to clear a lock whose owner is still alive, preventing two concurrent runs against the same destination.
 - Run-state and dashboard cache files are written atomically with a temp file and `os.replace`.
 - Corrupt or truncated `latest.json` is treated as absent instead of taking down the dashboard.
 - Device RPC reads are bounded by the per-call timeout budget and a response-size cap.
 - Configuration is range-validated at load time and bad path templates report clear `ConfigError` messages.
+- Material scans queue one follow-up pass if a scan request arrives while another scan is running; stale index rows are purged by scan watermark instead of a huge `NOT IN` clause.
 
 ## Safety
 

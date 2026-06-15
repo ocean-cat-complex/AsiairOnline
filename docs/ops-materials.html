@@ -1,0 +1,521 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ASIAIR OPS · 素材库</title>
+<script src="ops-theme.js"></script>
+<style>
+#bg{position:fixed;inset:0;width:100vw;height:100vh;z-index:0}
+.wrap{position:relative;z-index:2;max-width:1460px;margin:0 auto;padding:76px 26px 20px;min-height:100vh;
+  display:flex;flex-direction:column}
+
+/* 编辑式刊头:面包屑 + 标题 + 汇总 */
+.crumbs{font:400 12px var(--mono);color:var(--quiet);letter-spacing:.04em}
+.crumbs a{color:var(--muted);text-decoration:none;cursor:pointer}
+.crumbs a:hover{color:var(--ac)}
+.crumbs .sep{margin:0 7px;color:var(--quiet)}
+.head{display:flex;align-items:flex-end;gap:30px;flex-wrap:wrap;padding:8px 0 16px;border-bottom:1px solid var(--line)}
+.head h1{margin:0;font:var(--lab-w) 30px var(--display);letter-spacing:.08em}
+html[data-skin="B"] .head h1{font:500 38px var(--display);letter-spacing:.05em}
+html[data-skin="C"] .head h1{font:300 30px var(--display);letter-spacing:.02em}
+.head .meta{font:400 12px var(--mono);color:var(--muted)}
+.head .spacer{flex:1}
+.head .pl{text-align:right}
+.head .pl .lab{font-size:10.5px}
+.head .pl .bignum{font-size:24px;margin-top:2px}
+html[data-skin="B"] .head .pl .bignum{font-size:30px}
+.tools{display:flex;align-items:center;gap:9px;flex-wrap:wrap;padding:12px 0 4px}
+select.ops-sel.small,input.search{background:transparent;color:var(--text);border:1px solid var(--line);
+  border-radius:var(--pill);font:400 12px var(--body);padding:5px 12px}
+input.search{min-width:200px}
+input.search::placeholder{color:var(--quiet)}
+input.search:focus-visible,select.ops-sel.small:focus-visible{outline:1px solid var(--ac);outline-offset:2px}
+#scan-state{font:400 11.5px var(--mono);color:var(--quiet)}
+
+/* 最新入库胶片条 */
+.film{padding:16px 0 4px}
+.film .fhead{display:flex;align-items:baseline;gap:12px;margin-bottom:9px}
+.film .fhead b{font:var(--lab-w) 12.5px var(--display);letter-spacing:.24em;color:var(--ac);text-transform:var(--lab-tt)}
+.film .strip{display:flex;gap:10px;overflow-x:auto;padding-bottom:8px;scrollbar-width:thin}
+.film .cell{flex:none;width:148px;cursor:pointer;position:relative}
+.film .cell img{width:148px;height:99px;object-fit:cover;display:block;filter:saturate(.9)}
+html[data-skin="B"] .film .cell img{border:1px solid var(--line)}
+html[data-skin="C"] .film .cell img{border:1px solid var(--hair,#d8d6cf)}
+.film .cell .cap{margin-top:4px;font:400 10.5px var(--mono);color:var(--quiet);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.film .cell:hover .cap{color:var(--text)}
+.film .cell::after{content:"";position:absolute;left:0;right:0;top:0;height:2px;background:var(--ac);transform:scaleX(0);transition:transform .25s}
+.film .cell:hover::after{transform:scaleX(1)}
+
+/* 目录索引:排版式行,不是卡片 */
+.folders{padding:10px 0 2px}
+.folder{display:flex;align-items:center;gap:18px;padding:13px 2px;border-bottom:1px solid var(--line-dim);cursor:pointer}
+.folder:hover{border-bottom-color:var(--ac-soft)}
+.folder .cov{width:74px;height:50px;flex:none;overflow:hidden;position:relative}
+.folder .cov img{width:100%;height:100%;object-fit:cover;transform:scale(1);transition:transform .4s}
+.folder:hover .cov img{transform:scale(1.12)}
+.folder b{font:var(--lab-w) 19px var(--display);letter-spacing:.12em}
+html[data-skin="B"] .folder b{font:600 22px var(--display)}
+.folder .ct{margin-left:auto;font:400 12px var(--mono);color:var(--muted)}
+.folder .go{font:var(--lab-w) 13px var(--display);color:var(--quiet)}
+.folder:hover .go{color:var(--ac)}
+
+/* 缩略图墙 */
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(178px,1fr));padding:16px 0}
+.thumb{position:relative;cursor:pointer;opacity:0}
+@media (prefers-reduced-motion:reduce){.thumb{opacity:1!important;animation:none!important}}
+.thumb.in{animation:thIn .5s cubic-bezier(.2,.7,.3,1) forwards}
+@keyframes thIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.thumb img{width:100%;aspect-ratio:3/2;object-fit:cover;display:block;background:var(--line-dim)}
+html[data-skin="C"] .thumb img{border:1px solid var(--line)}
+.thumb .ov{position:absolute;inset:auto 0 0 0;padding:18px 8px 6px;
+  background:linear-gradient(0deg,rgba(0,0,0,.72),transparent);
+  font:400 10.5px var(--mono);color:#ddd;opacity:0;transition:opacity .2s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+html[data-skin="C"] .thumb .ov{background:linear-gradient(0deg,rgba(247,246,241,.92),transparent);color:#1a1a1a}
+.thumb:hover .ov{opacity:1}
+.thumb::after{content:"";position:absolute;inset:0;border:1px solid transparent;transition:border-color .2s}
+.thumb:hover::after{border-color:var(--ac-soft)}
+.empty-note{padding:28px 0;font:italic 300 13.5px var(--body);color:var(--quiet)}
+html[data-skin="A"] .empty-note,html[data-skin="C"] .empty-note{font-style:normal}
+
+.statusline{margin-top:auto}
+
+/* ── 看图器 ── */
+.viewer{position:fixed;inset:0;z-index:80;display:none;background:var(--bg)}
+.viewer.open{display:block}
+#vcanvas{position:absolute;inset:0;width:100vw;height:100vh;cursor:grab;touch-action:none}
+#vcanvas.dragging{cursor:grabbing}
+.v-top{position:absolute;left:22px;right:22px;top:14px;display:flex;align-items:center;gap:14px;z-index:5}
+.v-top .name{font:400 12.5px var(--mono);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
+.v-load{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:4;
+  font:var(--lab-w) 13px var(--display);letter-spacing:.3em;color:var(--quiet);text-transform:var(--lab-tt)}
+.v-rail{position:absolute;right:0;top:54px;bottom:90px;width:282px;z-index:5;
+  padding:16px 22px 10px 18px;border-left:1px solid var(--ac-soft);overflow:auto;scrollbar-width:none;
+  background:linear-gradient(270deg,var(--scrim) 62%,var(--scrim0))}
+.v-rail::-webkit-scrollbar{display:none}
+.v-nav{position:absolute;top:50%;transform:translateY(-50%);z-index:5;
+  font:300 34px/1 var(--display);color:var(--quiet);background:none;border:0;cursor:pointer;padding:18px 12px}
+.v-nav:hover{color:var(--ac)}
+.v-nav.prev{left:6px}.v-nav.next{right:290px}
+.v-bottom{position:absolute;left:22px;right:300px;bottom:10px;z-index:5;
+  padding:8px 0 0;background:linear-gradient(0deg,var(--scrim) 60%,var(--scrim0))}
+.v-bottom .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.v-hist{height:54px;margin-top:7px;position:relative}
+#vhist{position:absolute;inset:0;width:100%;height:100%}
+@media (max-width:900px){.v-rail{display:none}.v-nav.next{right:6px}.v-bottom{right:22px}}
+</style>
+</head>
+<body>
+<canvas id="bg" aria-hidden="true"></canvas>
+
+<main class="wrap">
+  <nav class="crumbs seq" id="crumbs" aria-label="路径"></nav>
+  <header class="head seq">
+    <h1 id="title">素材库</h1>
+    <span class="meta" id="dir-meta">--</span>
+    <span class="spacer"></span>
+    <div class="pl"><div class="lab">馆藏素材</div><div class="bignum" id="n-total">--</div></div>
+    <div class="pl"><div class="lab">预览就绪</div><div class="bignum" id="n-ready">--</div></div>
+  </header>
+
+  <div class="tools seq d1">
+    <select id="source-select" class="ops-sel small" aria-label="来源"></select>
+    <input id="search" class="search" type="search" placeholder="在当前目录筛选(文件名 / 目标)">
+    <button id="btn-scan" class="con" type="button">扫描入库</button>
+    <span id="scan-state">--</span>
+    <span class="con-note" style="margin-left:auto">点击缩略图打开档案大图 · 只读</span>
+  </div>
+
+  <section class="film seq d1" id="film" style="display:none">
+    <div class="fhead"><b>最新入库</b><span class="con-note" id="film-note"></span></div>
+    <div class="strip" id="film-strip"></div>
+  </section>
+
+  <section class="folders seq d2" id="folders"></section>
+  <section class="grid" id="grid"></section>
+  <div class="empty-note" id="empty" style="display:none">此目录暂无素材。</div>
+
+  <footer class="statusline seq d3">
+    <span class="kind" id="status-kind" style="color:var(--good)">[—]</span>
+    <span class="msg" id="status-text">连接素材库…</span>
+    <span class="ts" id="snapshot">--</span>
+  </footer>
+</main>
+
+<!-- 看图器 -->
+<div class="viewer" id="viewer" aria-hidden="true">
+  <canvas id="vcanvas"></canvas>
+  <div class="v-load" id="v-load">正在调取档案大图…</div>
+  <div class="v-top">
+    <span class="name num" id="v-name">--</span>
+    <button class="con" id="v-fit" type="button">适配</button>
+    <button class="con" id="v-100" type="button">100%</button>
+    <span class="con-note" id="v-zoom">--</span>
+    <button class="con" id="v-close" type="button">关闭 Esc</button>
+  </div>
+  <button class="v-nav prev" id="v-prev" type="button" aria-label="上一张">‹</button>
+  <button class="v-nav next" id="v-next" type="button" aria-label="下一张">›</button>
+  <aside class="v-rail">
+    <div class="hgroup"><h3><span class="rn">Ⅰ</span>档案</h3>
+      <div class="hrow"><span class="k">目标</span><span class="v ac" id="m-target">--</span></div>
+      <div class="hrow"><span class="k">帧型</span><span class="v" id="m-frame">--</span></div>
+      <div class="hrow"><span class="k">拍摄于</span><span class="v" id="m-cap">--</span></div>
+    </div>
+    <div class="hgroup"><h3><span class="rn">Ⅱ</span>曝光</h3>
+      <div class="hrow"><span class="k">曝光</span><span class="v" id="m-exp">--</span></div>
+      <div class="hrow"><span class="k">Bin / Gain</span><span class="v" id="m-bg">--</span></div>
+      <div class="hrow"><span class="k">传感器温度</span><span class="v" id="m-temp">--</span></div>
+    </div>
+    <div class="hgroup"><h3><span class="rn">Ⅲ</span>文件</h3>
+      <div class="hrow"><span class="k">大小</span><span class="v" id="m-size">--</span></div>
+      <div class="hrow"><span class="k">设备 / 来源</span><span class="v" id="m-dev">--</span></div>
+      <div class="hrow"><span class="k">入库于</span><span class="v dim" id="m-idx">--</span></div>
+    </div>
+  </aside>
+  <div class="v-bottom">
+    <div class="row">
+      <b class="lab" style="font-size:11.5px;color:var(--ac)">直方图拉伸</b>
+      <button class="con on" id="vs-auto" type="button">自动</button>
+      <button class="con" id="vs-strong" type="button">强拉伸</button>
+      <button class="con" id="vs-linear" type="button">原图</button>
+      <span class="con-note">滚轮缩放 · 拖拽平移 · ←→ 切换</span>
+    </div>
+    <div class="v-hist"><canvas id="vhist"></canvas></div>
+  </div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const OPS=window.OPS;
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const REDUCED=matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/* ── 背景星空(与总览同源,密度更低) ── */
+(function bg(){
+  const cv=$("bg"),ctx=cv.getContext("2d");
+  let stars=[];let s=7;const rnd=()=>{s^=s<<13;s^=s>>>17;s^=s<<5;return((s>>>0)/4294967296);};
+  function seed(){const n=Math.round(innerWidth*innerHeight/16000);
+    stars=Array.from({length:n},()=>({x:rnd(),y:rnd(),m:rnd(),ph:rnd()*6.28,sp:.4+rnd()}));}
+  seed();addEventListener("resize",seed);
+  (function draw(t){
+    const w=innerWidth,h=innerHeight,dpr=devicePixelRatio||1;
+    if(cv.width!==w*dpr||cv.height!==h*dpr){cv.width=w*dpr;cv.height=h*dpr;}
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.fillStyle=css("--sky-bg");ctx.fillRect(0,0,w,h);
+    ctx.fillStyle=css("--sky-star");
+    for(const st of stars){
+      const tw=REDUCED?1:(.7+.3*Math.sin(t/1000*st.sp+st.ph));
+      ctx.globalAlpha=(.08+st.m*.3)*tw;
+      ctx.beginPath();ctx.arc(st.x*w,st.y*h,st.m>.93?1.5:.8,0,7);ctx.fill();
+    }
+    ctx.globalAlpha=1;requestAnimationFrame(draw);
+  })(0);
+})();
+
+/* ── 状态与导航 ── */
+const SP=()=>new URLSearchParams(location.search);
+let curPath=SP().get("path")||"";
+let curPage=1; const PAGE_SIZE=60;
+{const uq=SP().get("q"); if(uq)$("search").value=uq;}
+function syncUrl(){
+  const p=SP();
+  curPath?p.set("path",curPath):p.delete("path");
+  const src=$("source-select").value; src?p.set("source",src):p.delete("source");
+  const kw=$("search").value.trim(); kw?p.set("q",kw):p.delete("q");
+  history.replaceState(null,"",location.pathname+"?"+p.toString());
+}
+let listing=null,summary=null,curImages=[];
+function nav(path){ curPath=path; curPage=1; syncUrl(); browse(); }
+addEventListener("popstate",()=>{ curPath=SP().get("path")||""; curPage=1; browse(); });
+
+function q(extra){
+  const p=new URLSearchParams(extra||{});
+  if(OPS.device)p.set("device",OPS.device);
+  const src=$("source-select").value;if(src)p.set("source",src);
+  return p.toString();
+}
+
+/* ── 汇总 + 来源 ── */
+async function loadSummary(){
+  try{
+    summary=await OPS.fetchJSON("/api/materials/summary?"+q());
+    $("n-total").textContent=summary.total??"--";
+    $("n-ready").textContent=summary.preview_ready??"--";
+    const sc=summary.scan||{};
+    $("scan-state").textContent=sc.running?`扫描中 · ${sc.current||""}`:`索引 ${sc.indexed_items??"--"} 项 · ${ (sc.finished_at||"").replace("T"," ") }`;
+    /* 最新入库:仅根目录展示 */
+    if(!curPath&&Array.isArray(summary.latest)&&summary.latest.length){
+      $("film").style.display="";
+      $("film-note").textContent=`${summary.latest.length} 帧 · 跨设备`;
+      const strip=$("film-strip");strip.innerHTML="";
+      summary.latest.forEach(it=>{
+        const c=document.createElement("div");c.className="cell";
+        c.innerHTML=`<img loading="lazy" src="${it.thumb_url||(`/api/materials/thumb?id=${it.id}`)}" alt="">
+          <div class="cap">${it.target||it.frame_type||""} · ${it.exposure||""} · ${it.device}</div>`;
+        c.addEventListener("click",()=>openViewer(summary.latest,summary.latest.indexOf(it)));
+        strip.appendChild(c);
+      });
+    }else $("film").style.display="none";
+  }catch(e){/* 汇总失败不阻塞浏览 */}
+}
+
+/* ── 目录浏览 ── */
+async function browse(){
+  try{
+    {const p=new URLSearchParams({path:curPath,page:String(curPage),page_size:String(PAGE_SIZE)});
+    if(OPS.device)p.set("device",OPS.device);
+    const src=$("source-select").value;if(src)p.set("source",src);
+    const kw=$("search").value.trim();if(kw)p.set("q",kw);
+    const got=await OPS.fetchJSON(`/api/materials/browse?${p}`);
+    if(curPage>1&&listing){
+      const seen=new Set((listing.images||[]).map(x=>x.id));
+      const fresh=(got.images||[]).filter(x=>!seen.has(x.id));
+      listing.images=(listing.images||[]).concat(fresh);
+      listing.image_total=got.image_total??listing.image_total;
+      listing._noMore=fresh.length===0;
+    }else listing=got;
+    syncUrl();}
+    renderCrumbs();renderListing();
+    $("status-kind").textContent="[OK]";$("status-kind").style.color="var(--good)";
+    $("status-text").textContent=`素材库在线 · ${listing.library_root_display||""} · ${listing.device||""} / ${listing.source||""}`;
+    $("snapshot").textContent=listing.generated_at||"--";
+    loadSummary();
+  }catch(e){
+    $("status-kind").textContent="[ERR]";$("status-kind").style.color="var(--bad)";
+    $("status-text").textContent="素材库加载失败:"+(e.message||"接口不可达");
+  }
+}
+function renderCrumbs(){
+  const bc=listing.breadcrumbs||[];
+  $("crumbs").innerHTML=bc.map((b,i)=>
+    `${i?'<span class="sep">/</span>':""}<a data-p="${b.path}">${b.label}</a>`).join("");
+  $("crumbs").querySelectorAll("a").forEach(a=>
+    a.addEventListener("click",()=>nav(a.dataset.p)));
+  const last=bc[bc.length-1];
+  $("title").textContent=curPath?(last?last.label:curPath.split("/").pop()):"素材库";
+}
+function matchSearch(it,kw){
+  if(!kw)return true;kw=kw.toLowerCase();
+  return (it.file_name||"").toLowerCase().includes(kw)||(it.target||"").toLowerCase().includes(kw);
+}
+function renderListing(){
+  const folders=(listing.folders||[]);
+  const fr=$("folders");fr.innerHTML="";
+  folders.forEach(f=>{
+    const el=document.createElement("div");el.className="folder";
+    el.innerHTML=`<span class="cov">${f.cover_thumb_url?`<img loading="lazy" src="${f.cover_thumb_url}" alt="">`:""}</span>
+      <b>${f.name}</b><span class="ct num">${f.item_count} 项</span><span class="go">进入 →</span>`;
+    el.addEventListener("click",()=>nav(f.path));
+    fr.appendChild(el);
+  });
+  curImages=(listing.images||[]);
+  const g=$("grid");g.innerHTML="";
+  curImages.forEach((it,i)=>{
+    const el=document.createElement("div");el.className="thumb";
+    el.style.animationDelay=Math.min(i,24)*28+"ms";
+    el.innerHTML=`<img loading="lazy" src="${it.thumb_url}" alt="${it.file_name}">
+      <div class="ov">${it.target||""} · ${it.exposure||""} · Gain${it.gain??"-"} · ${ (it.captured_at||"").slice(5,16).replace("T"," ") }</div>`;
+    el.addEventListener("click",()=>openViewer(curImages,i));
+    requestAnimationFrame(()=>el.classList.add("in"));
+    g.appendChild(el);
+  });
+  {let more=$("load-more");
+   if(!more){more=document.createElement("button");more.id="load-more";more.className="con";more.type="button";
+     more.textContent="载入更多";more.style.cssText="margin:6px auto 14px;display:block";
+     more.addEventListener("click",()=>{curPage++;browse();});
+     g.parentNode.insertBefore(more,g.nextSibling);}
+   const total=listing.image_total??curImages.length;
+   more.style.display=(curImages.length<total&&!listing._noMore)?"":"none";}
+  $("empty").style.display=(!folders.length&&!curImages.length)?"":"none";
+  const tot=listing.image_total??curImages.length;
+  $("dir-meta").textContent=`${folders.length} 个目录 · ${curImages.length<tot?`已载入 ${curImages.length} / ${tot}`:`${tot}`} 帧素材`;
+}
+let _qT=null;
+$("search").addEventListener("input",()=>{clearTimeout(_qT);_qT=setTimeout(()=>{curPage=1;browse();},350);});
+async function waitScan(){
+  for(let i=0;i<300;i++){
+    await loadSummary();
+    if(!(summary&&summary.scan&&summary.scan.running))break;
+    await new Promise(r=>setTimeout(r,1000));
+  }
+  curPage=1;await browse();
+}
+$("btn-scan").addEventListener("click",async()=>{
+  if(!OPS.scanAllowed()){$("scan-state").textContent="只读入口:扫描不可用";return;}
+  $("btn-scan").disabled=true;
+  try{
+    await OPS.fetchJSON("/api/materials/scan",{method:"POST",
+      headers:{"Content-Type":"application/json"},body:JSON.stringify({})});
+    $("scan-state").textContent="扫描中…";
+    await waitScan();
+  }catch(e){$("scan-state").textContent="扫描失败:"+(e.message||e);}
+  finally{$("btn-scan").disabled=false;}
+});
+document.addEventListener("ops:access",()=>{ if(!OPS.scanAllowed())$("btn-scan").disabled=true; });
+
+/* 来源选择:取自设备表 */
+(async function initSources(){
+  try{
+    const d=await OPS.fetchJSON("/api/devices");
+    const dev=(d.devices||[]).find(x=>x.name===(OPS.device||d.default_device))||d.devices[0];
+    const sel=$("source-select");sel.innerHTML="";
+    (dev&&dev.source_roots||[]).forEach(s=>{
+      const o=document.createElement("option");o.value=o.textContent=s.label;sel.appendChild(o);});
+    {const us=SP().get("source"); if(us&&[...sel.options].some(o=>o.value===us))sel.value=us;}
+    sel.addEventListener("change",()=>{curPage=1;browse();});
+  }catch(e){}
+  browse();
+})();
+
+/* ════════ 看图器:本地拉伸 + 缩放平移 ════════ */
+const vc=$("vcanvas"),vctx=vc.getContext("2d");
+let vList=[],vIdx=0,vSrc=null,vW=0,vH=0,vGray=null,vHistArr=new Float64Array(256);
+let vWork=document.createElement("canvas"),vWctx=vWork.getContext("2d");
+let vStf="auto",vView={x:0,y:0,z:1,fit:true};
+function mtf(x,m){if(x<=0)return 0;if(x>=1)return 1;return ((m-1)*x)/(((2*m-1)*x)-m);}
+function mtfInv(x0,y0){const m=x0*(y0-1)/(2*x0*y0-x0-y0);return Math.min(.99,Math.max(.01,m));}
+
+function openViewer(list,idx){
+  vList=list;vIdx=idx;
+  $("viewer").classList.add("open");
+  document.body.style.overflow="hidden";
+  loadView();
+}
+function closeViewer(){
+  $("viewer").classList.remove("open");
+  document.body.style.overflow="";
+}
+$("v-close").addEventListener("click",closeViewer);
+$("v-prev").addEventListener("click",()=>{vIdx=(vIdx-1+vList.length)%vList.length;loadView();});
+$("v-next").addEventListener("click",()=>{vIdx=(vIdx+1)%vList.length;loadView();});
+addEventListener("keydown",e=>{
+  if(!$("viewer").classList.contains("open"))return;
+  if(e.key==="Escape")closeViewer();
+  if(e.key==="ArrowLeft")$("v-prev").click();
+  if(e.key==="ArrowRight")$("v-next").click();
+});
+
+function loadView(){
+  const it=vList[vIdx];if(!it)return;
+  $("v-load").style.display="";$("v-load").textContent="正在调取档案大图…";
+  $("v-name").textContent=`${vIdx+1}/${vList.length} · ${it.file_name}`;
+  $("m-target").textContent=it.target||"--";
+  $("m-frame").textContent=it.frame_type||"--";
+  $("m-cap").textContent=(it.captured_at||"--").replace("T"," ");
+  $("m-exp").textContent=it.exposure||(it.exposure_seconds?it.exposure_seconds+"s":"--");
+  $("m-bg").textContent=`Bin${it.bin??"-"} / ${it.gain??"-"}`;
+  $("m-temp").textContent=it.temperature_c!=null?it.temperature_c+" °C":"--";
+  $("m-size").textContent=OPS.fmtBytes(it.size_bytes);
+  $("m-dev").textContent=`${it.device} / ${it.source_label||""}`;
+  $("m-idx").textContent=(it.indexed_at||"--").replace("T"," ");
+  const img=new Image();
+  img.onload=()=>{
+    vW=img.naturalWidth;vH=img.naturalHeight;
+    vWork.width=vW;vWork.height=vH;
+    vWctx.drawImage(img,0,0);
+    const d=vWctx.getImageData(0,0,vW,vH).data;
+    vGray=new Uint8Array(vW*vH);
+    for(let i=0,j=0;i<vGray.length;i++,j+=4)
+      vGray[i]=(d[j]*0.299+d[j+1]*0.587+d[j+2]*0.114)|0;
+    vHistArr.fill(0);
+    for(let i=0;i<vGray.length;i+=4)vHistArr[vGray[i]]++;
+    vSrc=img;vView.fit=true;
+    $("v-load").style.display="none";
+    applyVStf(vStf);
+  };
+  img.onerror=async()=>{
+    $("v-load").textContent="预览生成中…";
+    for(let i=0;i<20;i++){
+      await new Promise(r=>setTimeout(r,1500));
+      try{const st=await OPS.fetchJSON(`/api/materials/preview-status?id=${encodeURIComponent(it.id)}`);
+        const ready=st&&st.item&&st.item.preview_status==="ready";
+        if(ready){img.src=it.preview_url+(it.preview_url.includes("?")?"&":"?")+"t="+Date.now();return;}
+        if(st&&st.item&&st.item.preview_error){$("v-load").textContent="预览生成失败:"+st.item.preview_error;return;}
+      }catch(e){break;}
+    }
+    $("v-load").textContent="大图暂不可用";
+  };
+  img.src=it.preview_url;
+}
+function vStats(){
+  let n=0;for(let i=0;i<256;i++)n+=vHistArr[i];
+  let acc=0,med=0,lo=0,hi=1,a=0;
+  for(let i=0;i<256;i++){acc+=vHistArr[i];if(acc>=n/2){med=i/255;break;}}
+  for(let i=0;i<256;i++){a+=vHistArr[i];if(a>=n*.01){lo=i/255;break;}}
+  a=0;for(let i=0;i<256;i++){a+=vHistArr[i];if(a>=n*.997){hi=i/255;break;}}
+  return {med,lo,hi};
+}
+function applyVStf(kind){
+  vStf=kind;
+  ["vs-auto","vs-strong","vs-linear"].forEach(id=>$(id).classList.toggle("on",
+    id==="vs-"+kind));
+  if(!vSrc)return;
+  if(kind==="linear"){vWctx.drawImage(vSrc,0,0);}
+  else{
+    const {med,lo,hi}=vStats();
+    const b=Math.max(0,lo),w=Math.min(1,Math.max(hi,b+.05));
+    const medp=Math.min(.99,Math.max(.001,(med-b)/(w-b)));
+    const m=mtfInv(medp,kind==="strong"?.5:.3);
+    const lut=new Uint8ClampedArray(256);
+    for(let i=0;i<256;i++)lut[i]=Math.round(mtf(((i/255)-b)/Math.max(1e-4,w-b),m)*255);
+    vWctx.drawImage(vSrc,0,0);
+    const id=vWctx.getImageData(0,0,vW,vH),px=id.data;
+    for(let j=0;j<px.length;j+=4){px[j]=lut[px[j]];px[j+1]=lut[px[j+1]];px[j+2]=lut[px[j+2]];}
+    vWctx.putImageData(id,0,0);
+  }
+  drawV();drawVHist();
+}
+$("vs-auto").addEventListener("click",()=>applyVStf("auto"));
+$("vs-strong").addEventListener("click",()=>applyVStf("strong"));
+$("vs-linear").addEventListener("click",()=>applyVStf("linear"));
+
+function drawV(){
+  const w=innerWidth,h=innerHeight,dpr=devicePixelRatio||1;
+  if(vc.width!==w*dpr||vc.height!==h*dpr){vc.width=w*dpr;vc.height=h*dpr;}
+  vctx.setTransform(dpr,0,0,dpr,0,0);
+  vctx.fillStyle=css("--bg");vctx.fillRect(0,0,w,h);
+  if(!vSrc)return;
+  if(vView.fit){vView.z=Math.min((w-300)/vW,(h-150)/vH,1.6);
+    vView.x=(w-300-vW*vView.z)/2;vView.y=(h-110-vH*vView.z)/2+40;}
+  vctx.imageSmoothingEnabled=vView.z<1;
+  vctx.drawImage(vWork,vView.x,vView.y,vW*vView.z,vH*vView.z);
+  $("v-zoom").textContent=Math.round(vView.z*100)+"%";
+}
+function drawVHist(){
+  const cv=$("vhist"),ctx=cv.getContext("2d");
+  const w=cv.clientWidth,h=cv.clientHeight,dpr=devicePixelRatio||1;
+  if(cv.width!==w*dpr||cv.height!==h*dpr){cv.width=w*dpr;cv.height=h*dpr;}
+  ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
+  ctx.strokeStyle=css("--line");ctx.strokeRect(.5,.5,w-1,h-1);
+  let mx=0;for(let i=1;i<255;i++)mx=Math.max(mx,vHistArr[i]);
+  if(!mx)return;
+  ctx.fillStyle=css("--muted");ctx.globalAlpha=.85;
+  const bw=w/256;
+  for(let i=0;i<256;i++){
+    const v=Math.log1p(vHistArr[i])/Math.log1p(mx);
+    ctx.fillRect(i*bw,h-v*(h-5),Math.max(1,bw-0.4),v*(h-5));
+  }
+  ctx.globalAlpha=1;
+}
+(function vPointer(){
+  let drag=null;
+  vc.addEventListener("pointerdown",e=>{drag={x:e.clientX,y:e.clientY,vx:vView.x,vy:vView.y};
+    vc.classList.add("dragging");vc.setPointerCapture(e.pointerId);});
+  vc.addEventListener("pointermove",e=>{if(!drag)return;
+    vView.fit=false;vView.x=drag.vx+(e.clientX-drag.x);vView.y=drag.vy+(e.clientY-drag.y);drawV();});
+  vc.addEventListener("pointerup",()=>{drag=null;vc.classList.remove("dragging");});
+  vc.addEventListener("wheel",e=>{e.preventDefault();
+    const f=e.deltaY>0?1/1.15:1.15,nz=Math.min(8,Math.max(.05,vView.z*f));
+    vView.x=e.clientX-(e.clientX-vView.x)*(nz/vView.z);
+    vView.y=e.clientY-(e.clientY-vView.y)*(nz/vView.z);
+    vView.z=nz;vView.fit=false;drawV();},{passive:false});
+  vc.addEventListener("dblclick",()=>{vView.fit=true;drawV();});
+  $("v-fit").addEventListener("click",()=>{vView.fit=true;drawV();});
+  $("v-100").addEventListener("click",()=>{vView.fit=false;vView.z=1;
+    vView.x=(innerWidth-300-vW)/2;vView.y=(innerHeight-vH)/2;drawV();});
+  addEventListener("resize",()=>{if($("viewer").classList.contains("open"))drawV();});
+})();
+OPS.onSkin(()=>{drawV();drawVHist();});
+</script>
+</body>
+</html>

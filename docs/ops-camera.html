@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ASIAIR OPS · 相机</title>
+<script src="ops-theme.js"></script>
+<style>
+html,body{height:100%;overflow:hidden}
+/* 全屏图像舞台 */
+#stage{position:fixed;inset:0;z-index:0;cursor:grab;touch-action:none;background:var(--sky-bg)}
+#stage.dragging{cursor:grabbing}
+.stage-empty{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:1;
+  font:var(--lab-w) 15px var(--display);letter-spacing:.3em;color:var(--quiet);text-transform:var(--lab-tt)}
+
+/* 左上:帧信息(羽化遮罩,无框) */
+.meta{position:fixed;left:24px;top:64px;z-index:10;max-width:46vw;
+  padding:10px 26px 16px 0;background:linear-gradient(135deg,var(--scrim) 30%,var(--scrim0))}
+.meta h1{margin:0;font:var(--lab-w) 24px var(--display);letter-spacing:.1em}
+html[data-skin="B"] .meta h1{font:500 30px var(--display);letter-spacing:.05em}
+html[data-skin="C"] .meta h1{font:300 26px var(--display)}
+.meta .cam{font:400 12px var(--mono);color:var(--muted);margin-top:2px}
+.meta .line{font:400 11.5px var(--mono);color:var(--quiet);margin-top:6px}
+.badge{display:inline-flex;align-items:center;gap:7px;margin-top:9px;
+  font:var(--lab-w) 11px var(--display);letter-spacing:.18em;padding:3px 11px;
+  border:1px solid var(--line);border-radius:var(--pill);color:var(--muted);text-transform:var(--lab-tt)}
+.badge i{width:7px;height:7px;border-radius:50%;background:var(--quiet)}
+.badge.on{color:var(--good);border-color:var(--good)} .badge.on i{background:var(--good)}
+.badge.warn{color:var(--warn);border-color:var(--warn)} .badge.warn i{background:var(--warn)}
+html[data-skin="C"] .badge i,html[data-skin="B"] .badge i{border-radius:0}
+
+/* 右栏:参数(细线分组) */
+.rail{position:fixed;right:0;top:54px;bottom:120px;z-index:10;width:300px;
+  padding:18px 24px 10px 20px;border-left:1px solid var(--ac-soft);overflow:auto;scrollbar-width:none;
+  background:linear-gradient(270deg,var(--scrim) 65%,var(--scrim0))}
+.rail::-webkit-scrollbar{display:none}
+html[data-skin="C"] .rail{border-left-color:var(--line)}
+.rail .ro-note{margin:0 0 10px;padding:7px 10px;border-left:3px solid var(--warn);
+  font:400 11.5px var(--body);color:var(--warn)}
+.progress{height:3px;background:var(--line-dim);margin:8px 0 4px;position:relative;display:none}
+.progress.show{display:block}
+.progress i{position:absolute;left:0;top:0;bottom:0;background:var(--ac);width:0%}
+.rail .btns{display:grid;gap:8px;margin-top:8px}
+button.primary{background:var(--ac);color:var(--bg);border:1px solid var(--ac);border-radius:var(--pill);
+  font:var(--lab-w) 12.5px var(--display);letter-spacing:.16em;padding:8px 12px;cursor:pointer;text-transform:var(--lab-tt)}
+button.primary:disabled{opacity:.4;cursor:not-allowed}
+
+/* 底部:直方图与拉伸(图像之上的一条仪表带) */
+.histo{position:fixed;left:24px;right:330px;bottom:36px;z-index:10;
+  padding:10px 14px 8px 0;background:linear-gradient(0deg,var(--scrim) 55%,var(--scrim0))}
+.histo .hd{display:flex;align-items:center;gap:9px;flex-wrap:wrap;padding-bottom:7px}
+.histo .hd b{font:var(--lab-w) 12px var(--display);letter-spacing:.22em;color:var(--ac);text-transform:var(--lab-tt)}
+.histo .read{font:400 11px var(--mono);color:var(--quiet);margin-left:auto}
+.hist-wrap{position:relative;height:74px}
+#hist{position:absolute;inset:0;width:100%;height:100%}
+.handle{position:absolute;top:0;bottom:0;width:14px;margin-left:-7px;cursor:ew-resize;z-index:3}
+.handle::before{content:"";position:absolute;left:6px;top:0;bottom:0;width:2px;background:var(--ac)}
+.handle.b::before{background:var(--text)}
+.handle.w::before{background:var(--text)}
+.handle::after{content:attr(data-l);position:absolute;left:50%;transform:translateX(-50%);bottom:-15px;
+  font:600 9.5px var(--mono);color:var(--muted)}
+.zoombar{position:fixed;right:330px;bottom:178px;z-index:10;display:flex;gap:6px;align-items:center}
+.zoombar .con-note{margin-right:4px}
+
+.statusline{position:fixed;left:24px;right:330px;bottom:0;z-index:11;padding:6px 0 8px;background:var(--bg)}
+html[data-skin="C"] .histo,html[data-skin="C"] .statusline{background:linear-gradient(0deg,var(--scrim) 70%,var(--scrim0))}
+
+@media (max-width:980px){
+  html,body{overflow:auto}
+  .rail{position:static;width:auto;border-left:0;border-top:1px solid var(--ac-soft);margin-top:46vh;background:var(--bg)}
+  .histo,.statusline{left:14px;right:14px}
+  .histo{bottom:auto;position:relative;margin:10px 14px;background:var(--bg)}
+  .zoombar{display:none}
+  .meta{max-width:80vw}
+}
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<div class="stage-empty" id="stage-empty">正在取回最近一帧…</div>
+
+<section class="meta seq">
+  <h1 id="dev-name">相机</h1>
+  <div class="cam" id="cam-name">--</div>
+  <div class="line num" id="img-line">--</div>
+  <span class="badge" id="state-badge"><i></i><span id="state-text">检测中</span></span>
+  <span class="badge" id="demo-badge" style="display:none"><i></i><span>演示曝光</span></span>
+</section>
+
+<aside class="rail seq d1">
+  <div class="ro-note" id="ro-note">当前为监控视角 —— 参数只读;切换为主控后可写入。</div>
+  <div class="ro-note" id="access-note" style="display:none">当前为只读入口,无法拍摄。<a id="access-note-link" href="#" style="color:var(--ac)">点此打开可操作入口 →</a></div>
+
+  <div class="hgroup"><h3><span class="rn">Ⅰ</span>采集</h3>
+    <div class="hrow"><span class="k">状态</span><span class="v" id="r-state">--</span></div>
+    <div class="hrow"><span class="k">模式</span><span class="v" id="r-mode">--</span></div>
+    <div class="hrow"><span class="k">本帧</span><span class="v" id="r-frame">--</span></div>
+    <div class="progress" id="cap-prog"><i></i></div>
+    <div class="btns">
+      <button class="primary" id="btn-shoot" type="button" disabled>拍摄一张</button>
+      <button class="con" id="btn-demo" type="button">演示拍摄(本地模拟)</button>
+      <button class="con" id="btn-refresh" type="button">拉取最新图像</button>
+    </div>
+  </div>
+
+  <div class="hgroup"><h3><span class="rn">Ⅱ</span>曝光参数</h3>
+    <div class="hrow"><span class="k">曝光 (s)</span><span class="v"><input id="exposure-input" type="number" min="0.001" step="0.1" style="width:90px;background:transparent;color:var(--text);border:1px solid var(--line);border-radius:var(--pill);font:inherit;padding:2px 10px;text-align:right"></span></div>
+    <div class="hrow"><span class="k">Bin</span><span class="v"><select id="bin-select" style="background:transparent;color:var(--text);border:1px solid var(--line);border-radius:var(--pill);font:inherit;padding:2px 10px"></select></span></div>
+    <div class="hrow"><span class="k">Gain / Offset</span><span class="v" id="r-gain">--</span></div>
+    <div class="btns" style="margin-top:6px">
+      <button class="con" id="apply-exposure-btn" type="button" disabled>写入曝光参数</button>
+    </div>
+    <div id="op-msg" class="con-note" style="display:block;margin-top:6px"></div>
+  </div>
+
+  <div class="hgroup"><h3><span class="rn">Ⅲ</span>传感器</h3>
+    <div class="hrow"><span class="k">温度</span><span class="v ac" id="r-temp">--</span></div>
+    <div class="hrow"><span class="k">制冷功率</span><span class="v" id="r-cool">--</span></div>
+    <div class="hrow"><span class="k">芯片</span><span class="v" id="r-chip">--</span></div>
+    <div class="hrow"><span class="k">像元</span><span class="v" id="r-px">--</span></div>
+  </div>
+
+  <div class="hgroup"><h3><span class="rn">Ⅳ</span>本帧来源</h3>
+    <div class="hrow"><span class="k">帧编号</span><span class="v" id="r-imgid">--</span></div>
+    <div class="hrow"><span class="k">原始尺寸</span><span class="v" id="r-osize">--</span></div>
+    <div class="hrow"><span class="k">帧龄</span><span class="v dim" id="r-age">--</span></div>
+  </div>
+</aside>
+
+<div class="zoombar seq d2">
+  <span class="con-note" id="zoom-read">--</span>
+  <button class="con" id="z-fit" type="button">适配</button>
+  <button class="con" id="z-100" type="button">100%</button>
+  <button class="con" id="z-out" type="button">−</button>
+  <button class="con" id="z-in" type="button">＋</button>
+</div>
+
+<section class="histo seq d2">
+  <div class="hd">
+    <b>直方图拉伸 · 本地实时</b>
+    <button class="con on" id="s-auto" type="button">自动</button>
+    <button class="con" id="s-strong" type="button">强拉伸</button>
+    <button class="con" id="s-linear" type="button">线性</button>
+    <span class="read num" id="stf-read">--</span>
+  </div>
+  <div class="hist-wrap" id="hist-wrap">
+    <canvas id="hist"></canvas>
+    <div class="handle b" id="h-b" data-l="黑场"></div>
+    <div class="handle m" id="h-m" data-l="中调"></div>
+    <div class="handle w" id="h-w" data-l="白场"></div>
+  </div>
+</section>
+
+<footer class="statusline seq d3">
+  <span class="kind" id="status-kind" style="color:var(--good)">[—]</span>
+  <span class="msg" id="status-text">连接相机…</span>
+  <span class="ts" id="snapshot">--</span>
+</footer>
+
+<script>
+const $=id=>document.getElementById(id);
+const OPS=window.OPS;
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const REDUCED=matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/* ───── 图像核心:原始像素 + LUT 拉伸 + 视口变换 ───── */
+const stage=$("stage"),sctx=stage.getContext("2d");
+let srcW=0,srcH=0,srcGray=null;      // 原始灰度 Uint8Array
+let hist=new Float64Array(256);
+let work=document.createElement("canvas"),wctx=work.getContext("2d");
+let stf={b:0,m:.5,w:1};
+let view={x:0,y:0,z:1,fit:true};
+let frameAlpha=1, frameAnimT0=0;
+
+function mtf(x,m){if(x<=0)return 0;if(x>=1)return 1;return ((m-1)*x)/(((2*m-1)*x)-m);}
+function mtfInvParam(x0,y0){ // 求 m,使 MTF(x0,m)=y0
+  const m=x0*(y0-1)/(2*x0*y0-x0-y0);
+  return Math.min(.99,Math.max(.01,m));
+}
+function applyLUT(){
+  if(!srcGray)return;
+  const lut=new Uint8ClampedArray(256);
+  const {b,m,w}=stf,span=Math.max(1e-4,w-b);
+  for(let i=0;i<256;i++){
+    const x=(i/255-b)/span;
+    lut[i]=Math.round(mtf(x,m)*255);
+  }
+  const id=wctx.createImageData(srcW,srcH),px=id.data;
+  for(let i=0,j=0;i<srcGray.length;i++,j+=4){
+    const v=lut[srcGray[i]];
+    px[j]=px[j+1]=px[j+2]=v;px[j+3]=255;
+  }
+  wctx.putImageData(id,0,0);
+  drawStage();drawHist();
+  $("stf-read").textContent=`黑 ${stf.b.toFixed(3)} · 中 ${stf.m.toFixed(3)} · 白 ${stf.w.toFixed(3)}`;
+  placeHandles();
+}
+function drawStage(){
+  const w=innerWidth,h=innerHeight,dpr=devicePixelRatio||1;
+  if(stage.width!==w*dpr||stage.height!==h*dpr){stage.width=w*dpr;stage.height=h*dpr;}
+  sctx.setTransform(dpr,0,0,dpr,0,0);
+  sctx.fillStyle=css("--sky-bg");sctx.fillRect(0,0,w,h);
+  if(!srcGray)return;
+  if(view.fit){
+    view.z=Math.min(w/srcW,h/srcH);
+    view.x=(w-srcW*view.z)/2;view.y=(h-srcH*view.z)/2;
+  }
+  sctx.imageSmoothingEnabled=view.z<1;
+  sctx.globalAlpha=frameAlpha;
+  sctx.drawImage(work,view.x,view.y,srcW*view.z,srcH*view.z);
+  sctx.globalAlpha=1;
+  $("zoom-read").textContent=Math.round(view.z*100)+"%";
+}
+function buildHist(){
+  hist.fill(0);
+  for(let i=0;i<srcGray.length;i+=2)hist[srcGray[i]]++; // 隔点采样足够
+}
+function drawHist(){
+  const cv=$("hist"),ctx=cv.getContext("2d");
+  const w=cv.clientWidth,h=cv.clientHeight,dpr=devicePixelRatio||1;
+  if(cv.width!==w*dpr||cv.height!==h*dpr){cv.width=w*dpr;cv.height=h*dpr;}
+  ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
+  ctx.strokeStyle=css("--line");ctx.strokeRect(.5,.5,w-1,h-1);
+  if(!srcGray)return;
+  let mx=0;for(let i=1;i<255;i++)mx=Math.max(mx,hist[i]);
+  if(!mx)return;
+  ctx.fillStyle=css("--muted");ctx.globalAlpha=.85;
+  const bw=w/256;
+  for(let i=0;i<256;i++){
+    const v=Math.log1p(hist[i])/Math.log1p(mx);
+    ctx.fillRect(i*bw,h-v*(h-6),Math.max(1,bw-0.4),v*(h-6));
+  }
+  ctx.globalAlpha=1;
+  /* 拉伸区间着色 */
+  ctx.fillStyle=css("--ac");ctx.globalAlpha=.12;
+  ctx.fillRect(stf.b*w,0,Math.max(1,(stf.w-stf.b)*w),h);
+  ctx.globalAlpha=1;
+}
+function placeHandles(){
+  const w=$("hist-wrap").clientWidth;
+  $("h-b").style.left=(stf.b*w)+"px";
+  $("h-w").style.left=(stf.w*w)+"px";
+  $("h-m").style.left=((stf.b+(stf.w-stf.b)*stf.m)*w)+"px";
+}
+
+/* 拉伸预设(基于直方图统计) */
+function stats(){
+  let n=0;for(let i=0;i<256;i++)n+=hist[i];
+  let acc=0,med=0;for(let i=0;i<256;i++){acc+=hist[i];if(acc>=n/2){med=i/255;break;}}
+  let mad=0,acc2=0;for(let i=0;i<256;i++){acc2+=hist[i];if(acc2>=n/2){ /* 近似 MAD:用分位差 */ break;}}
+  // 用 1% / 99.7% 分位
+  let lo=0,hi=1,a=0;
+  for(let i=0;i<256;i++){a+=hist[i];if(a>=n*.01){lo=i/255;break;}}
+  a=0;for(let i=0;i<256;i++){a+=hist[i];if(a>=n*.997){hi=i/255;break;}}
+  return {med,lo,hi};
+}
+function preset(kind){
+  const {med,lo,hi}=stats();
+  if(kind==="linear")stf={b:0,m:.5,w:1};
+  else{
+    const b=Math.max(0,lo-(kind==="strong"?.0:.01));
+    const w=Math.min(1,Math.max(hi,b+.05));
+    const medp=Math.min(.99,Math.max(.001,(med-b)/(w-b)));
+    const target=kind==="strong"?.45:.25;
+    stf={b,m:mtfInvParam(medp,target),w};
+  }
+  ["s-auto","s-strong","s-linear"].forEach(id=>$(id).classList.toggle("on",
+    (kind==="auto"&&id==="s-auto")||(kind==="strong"&&id==="s-strong")||(kind==="linear"&&id==="s-linear")));
+  applyLUT();
+}
+$("s-auto").addEventListener("click",()=>preset("auto"));
+$("s-strong").addEventListener("click",()=>preset("strong"));
+$("s-linear").addEventListener("click",()=>preset("linear"));
+
+/* 手柄拖拽 */
+(function(){
+  let drag=null;
+  const wrap=$("hist-wrap");
+  function pos(e){const r=wrap.getBoundingClientRect();return Math.min(1,Math.max(0,(e.clientX-r.left)/r.width));}
+  [["h-b","b"],["h-m","m"],["h-w","w"]].forEach(([id,key])=>{
+    $(id).addEventListener("pointerdown",e=>{drag=key;$(id).setPointerCapture(e.pointerId);e.preventDefault();});
+  });
+  addEventListener("pointermove",e=>{
+    if(!drag)return;
+    const p=pos(e);
+    if(drag==="b")stf.b=Math.min(p,stf.w-.02);
+    else if(drag==="w")stf.w=Math.max(p,stf.b+.02);
+    else stf.m=Math.min(.99,Math.max(.01,(p-stf.b)/Math.max(1e-4,stf.w-stf.b)));
+    ["s-auto","s-strong","s-linear"].forEach(id=>$(id).classList.remove("on"));
+    if(!REDUCED)requestAnimationFrame(applyLUT);else applyLUT();
+  });
+  addEventListener("pointerup",()=>drag=null);
+})();
+
+/* 视口:拖拽 / 滚轮 / 适配 */
+(function(){
+  let drag=null;
+  stage.addEventListener("pointerdown",e=>{drag={x:e.clientX,y:e.clientY,vx:view.x,vy:view.y};
+    stage.classList.add("dragging");stage.setPointerCapture(e.pointerId);});
+  stage.addEventListener("pointermove",e=>{if(!drag)return;
+    view.fit=false;view.x=drag.vx+(e.clientX-drag.x);view.y=drag.vy+(e.clientY-drag.y);drawStage();});
+  stage.addEventListener("pointerup",()=>{drag=null;stage.classList.remove("dragging");});
+  stage.addEventListener("wheel",e=>{e.preventDefault();
+    const f=e.deltaY>0?1/1.15:1.15;
+    const nz=Math.min(8,Math.max(.05,view.z*f));
+    view.x=e.clientX-(e.clientX-view.x)*(nz/view.z);
+    view.y=e.clientY-(e.clientY-view.y)*(nz/view.z);
+    view.z=nz;view.fit=false;drawStage();},{passive:false});
+  stage.addEventListener("dblclick",()=>{view.fit=true;drawStage();});
+  $("z-fit").addEventListener("click",()=>{view.fit=true;drawStage();});
+  $("z-100").addEventListener("click",()=>{view.fit=false;view.z=1;
+    view.x=(innerWidth-srcW)/2;view.y=(innerHeight-srcH)/2;drawStage();});
+  $("z-in").addEventListener("click",()=>{view.fit=false;view.z=Math.min(8,view.z*1.25);drawStage();});
+  $("z-out").addEventListener("click",()=>{view.fit=false;view.z=Math.max(.05,view.z/1.25);drawStage();});
+  addEventListener("resize",drawStage);
+})();
+
+/* 帧入场动画 */
+function frameIn(){
+  if(REDUCED){frameAlpha=1;drawStage();return;}
+  frameAnimT0=performance.now();
+  (function step(t){
+    const p=Math.min(1,(t-frameAnimT0)/600);
+    frameAlpha=p;drawStage();
+    if(p<1)requestAnimationFrame(step);
+  })(frameAnimT0);
+}
+
+/* ───── 数据拉取 ───── */
+let camState=null,imgMeta=null;
+function setBadge(text,cls){const b=$("state-badge");b.className="badge "+(cls||"");$("state-text").textContent=text;}
+async function loadImage(force){
+  try{
+    {const p=new URLSearchParams();if(OPS.device)p.set("device",OPS.device);if(force)p.set("refresh","1");
+    imgMeta=await OPS.fetchJSON("/api/current-image?"+p.toString());}
+    const im=imgMeta.image||{};
+    $("img-line").textContent=`${im.width}×${im.height} · Bin${im.bin} · 曝光 ${im.exposure_ms/1000}s · 帧 #${im.image_id}`;
+    $("r-imgid").textContent="#"+(im.image_id??"--");
+    $("r-osize").textContent=im.original_width?`${im.original_width} × ${im.original_height}`:"--";
+    $("r-age").textContent=OPS.fmtAgo(imgMeta.age_seconds);
+    const img=new Image();
+    img.onload=()=>{
+      srcW=img.naturalWidth;srcH=img.naturalHeight;
+      work.width=srcW;work.height=srcH;
+      wctx.drawImage(img,0,0);
+      const d=wctx.getImageData(0,0,srcW,srcH).data;
+      srcGray=new Uint8Array(srcW*srcH);
+      for(let i=0,j=0;i<srcGray.length;i++,j+=4)srcGray[i]=d[j];
+      buildHist();
+      $("stage-empty").style.display="none";
+      preset("auto");frameIn();
+    };
+    img.onerror=()=>{$("stage-empty").textContent="帧文件取回失败";};
+    img.src=imgMeta.image_url;
+  }catch(e){$("stage-empty").textContent="未取得当前帧:"+(e.message||"接口不可达");}
+}
+async function loadState(){
+  try{
+    /* 接入修订:补传 session_id,否则 lease.held_by_self 恒为 false,主控文案与顶栏矛盾 */
+    camState=await OPS.fetchJSON("/api/camera-state"+(OPS.device?`?device=${encodeURIComponent(OPS.device)}&session_id=${encodeURIComponent(OPS.sessionId||"")}`:""));
+    const cam=camState.camera||{},app=camState.app||{},ctl=camState.controls||{},exp=camState.exposure||{};
+    $("dev-name").textContent=(camState.device&&camState.device.name)||"相机";
+    $("cam-name").textContent=cam.name||"--";
+    const working=!!app.capture_working;
+    setBadge(working?"采集中":"在线 · "+(app.capture_state||"idle"),working?"warn":"on");
+    $("r-state").textContent=app.capture_state||"--";
+    $("r-mode").textContent=app.exposure_mode||"--";
+    $("r-frame").textContent=app.capture_progress!=null?Math.round(app.capture_progress*100)+"%":"--";
+    const pr=$("cap-prog");pr.classList.toggle("show",working);
+    if(working)pr.querySelector("i").style.width=((app.capture_progress||0)*100)+"%";
+    if(document.activeElement!==$("exposure-input")&&exp.seconds!=null)$("exposure-input").value=exp.seconds;
+    {const bs=$("bin-select");
+     if(!bs.options.length)((cam.bins&&cam.bins.length)?cam.bins:[1,2,3,4]).forEach(b=>{const o=document.createElement("option");o.value=o.textContent=b;bs.appendChild(o);});
+     if(document.activeElement!==bs&&exp.bin!=null)bs.value=exp.bin;}
+    $("r-gain").textContent=(ctl.gain?ctl.gain.display:"--")+" / "+(ctl.offset?ctl.offset.display:"--");
+    $("r-temp").textContent=ctl.temperature?ctl.temperature.display:"--";
+    $("r-cool").textContent=ctl.cool_power?ctl.cool_power.display:"--";
+    $("r-chip").textContent=cam.chip_size?cam.chip_size.join(" × "):"--";
+    $("r-px").textContent=cam.pixel_size_um?cam.pixel_size_um+" µm":"--";
+    $("status-kind").textContent="[OK]";$("status-kind").style.color="var(--good)";
+    $("status-text").textContent=`相机在线 · ${cam.name||""} · ${camState.lease&&camState.lease.held_by_self?"主控会话":"监控视角(只读)"}`;
+    $("snapshot").textContent=camState.snapshot_at||"--";
+  }catch(e){
+    setBadge("无响应","");
+    $("status-kind").textContent="[ERR]";$("status-kind").style.color="var(--bad)";
+    $("status-text").textContent="相机状态加载失败:"+(e.message||"接口不可达");
+  }
+  const gate=OPS.actionsAllowed();
+  const self=OPS.heldBySelf&&gate;
+  $("btn-shoot").disabled=!self;
+  $("apply-exposure-btn").disabled=!self;
+  $("ro-note").style.display=(self||!gate)?"none":"";
+  $("access-note").style.display=gate?"none":"";
+  if(!gate)$("access-note-link").href=OPS.actionEntry("camera");
+}
+OPS.onControl(()=>loadState());document.addEventListener("ops:access",loadState);
+
+$("btn-refresh").addEventListener("click",()=>loadImage(true));
+function newOpId(){return (window.crypto&&crypto.randomUUID)?crypto.randomUUID():`${Date.now()}-${Math.random().toString(16).slice(2)}`;}
+async function postCameraAction(action,extra){
+  const operation_id=newOpId();
+  const body={device:OPS.device,session_id:OPS.sessionId,operation_id,action,...(extra||{})};
+  const opTimer=setInterval(async()=>{
+    try{const q=new URLSearchParams({device:OPS.device,session_id:OPS.sessionId,operation_id});
+      const p=await OPS.fetchJSON(`/api/camera-operation?${q}`);
+      const op=p&&p.operation;if(!op)return;
+      $("op-msg").textContent=`${op.label||"执行中"} ${op.step||0}/${op.total||1}`;
+      if(op.state==="done"||op.state==="error")clearInterval(opTimer);
+    }catch(e){}},500);
+  try{
+    const payload=await OPS.fetchJSON("/api/camera-action",{method:"POST",
+      headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    $("op-msg").textContent=action==="shutter"?"已发送快门":"参数已写入";
+    return payload;
+  }catch(err){
+    $("op-msg").textContent="操作失败:"+(err.message||err);
+    $("status-kind").textContent="[ERR]";$("status-kind").style.color="var(--bad)";
+    $("status-text").textContent=err.message||String(err);
+    throw err;
+  }finally{setTimeout(()=>clearInterval(opTimer),4000);}
+}
+async function trackCapture(){
+  const pr=$("cap-prog");pr.classList.add("show");setBadge("采集中","warn");
+  for(let i=0;i<240;i++){
+    await new Promise(r=>setTimeout(r,500));
+    try{const cp=await OPS.fetchJSON(`/api/capture-progress?device=${encodeURIComponent(OPS.device)}`);
+      if(cp&&cp.progress!=null)pr.querySelector("i").style.width=(cp.progress*100)+"%";
+      if(cp&&cp.is_working===false)break;
+    }catch(e){break;}
+  }
+  pr.classList.remove("show");
+}
+$("btn-shoot").addEventListener("click",async()=>{
+  try{
+    const extra={exposure_seconds:Number($("exposure-input").value)||undefined,bin:Number($("bin-select").value)||undefined};
+    await postCameraAction("shutter",extra);
+    await trackCapture();
+    await loadImage(true);
+  }catch(e){}
+});
+$("apply-exposure-btn").addEventListener("click",async()=>{
+  try{
+    await postCameraAction("apply_exposure",{exposure_seconds:Number($("exposure-input").value),bin:Number($("bin-select").value)});
+    setTimeout(loadState,700);
+  }catch(e){}
+});
+
+/* 演示拍摄:纯本地模拟一次曝光进度,完成后重取当前帧 */
+$("btn-demo").addEventListener("click",()=>{
+  const secs=(camState&&camState.exposure&&camState.exposure.seconds)||5;
+  const pr=$("cap-prog");pr.classList.add("show");
+  $("demo-badge").style.display="";setBadge("演示曝光中","warn");
+  const t0=performance.now(),dur=Math.min(8,secs)*1000;
+  (function step(t){
+    const p=Math.min(1,(t-t0)/dur);
+    pr.querySelector("i").style.width=(p*100)+"%";
+    $("r-frame").textContent=Math.round(p*100)+"%";
+    if(p<1)requestAnimationFrame(step);
+    else{
+      pr.classList.remove("show");$("demo-badge").style.display="none";
+      setBadge("在线 · idle","on");
+      loadImage();   /* 重新取帧并播放入场动画 */
+    }
+  })(t0);
+});
+
+OPS.onSkin(()=>{drawStage();drawHist();});
+loadImage();
+loadState();setInterval(()=>{if(!OPS.hidden())loadState();},3000);
+</script>
+</body>
+</html>

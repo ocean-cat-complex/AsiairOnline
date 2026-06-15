@@ -5,7 +5,7 @@ This repository is the ASIAIR sidecar for the remote observatory website. Read t
 ## Scope
 
 - Current branch target: `asiair_online_macos`.
-- Runtime role: independent sidecar service for ASIAIR monitoring, current image preview, guarded camera controls, local material indexing, and incremental backup.
+- Runtime role: independent sidecar service for ASIAIR monitoring, current image preview, read-only mount status, guarded camera controls, local material indexing, and incremental backup.
 - Python: `>=3.12`; on this Mac prefer `/opt/homebrew/bin/python3.13`.
 - Host assumptions: macOS with Tailscale or private LAN access to ASIAIR devices.
 
@@ -26,6 +26,7 @@ Read-only RPC and image reads may fail over across enabled endpoints. Write/cont
 src/asiairbridge/       Python package and CLI
 scripts/*.sh            macOS/Linux operational scripts
 docs/asiair-*.html      Runtime frontend pages served by src/asiairbridge/web.py
+docs/ops-*.html         Current OPS frontend pages served by the main routes
 config/devices.example.json
 tests/
 ```
@@ -56,6 +57,9 @@ PYTHON=/opt/homebrew/bin/python3.13 ./scripts/start-web.sh
 PYTHON=/opt/homebrew/bin/python3.13 ./scripts/backup-all.sh
 RUN_BACKUP=1 PYTHON=/opt/homebrew/bin/python3.13 ./scripts/backup-all.sh
 ```
+
+Main local pages on port `8787`: `/` or `/monitor-minterm`, `/camera`, `/mount`, and `/materials`.
+Core read-only APIs: `/api/status`, `/api/devices`, `/api/rpc-monitor`, `/api/mount-state`, `/api/current-image`, and `/api/current-image-file`.
 
 ## Safety
 

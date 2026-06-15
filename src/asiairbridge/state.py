@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -26,14 +27,20 @@ class RunLock:
             holder_pid = _read_lock_pid(self.path)
             alive = _pid_is_running(holder_pid) if holder_pid else None
             if self.force:
+                # --force-lock must not blow away a lock whose owner is still
+                # alive: that would let two backups write the same destination.
                 if alive is True:
                     raise RuntimeError(
                         f"Refusing --force-lock: backup process pid={holder_pid} "
                         f"still appears to be running. Stop it first: {self.path}"
                     )
-                self.path.unlink()
+                self._claim_stale()
             elif alive is False:
-                self.path.unlink()
+                # Stale lock left by a crashed/killed run (PID is positively
+                # dead) — reclaim automatically so scheduled backups self-heal.
+                self._claim_stale()
+            # alive is True (genuinely running) or None (unreadable/unknown
+            # holder): fall through and let O_EXCL reject the acquisition.
 
         try:
             self._fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
@@ -50,8 +57,21 @@ class RunLock:
         }
         payload.update(self.metadata)
         os.write(self._fd, json.dumps(payload, ensure_ascii=False).encode("utf-8"))
-        os.fsync(self._fd)
         return self
+
+    def _claim_stale(self) -> None:
+        # Atomic reclaim: two simultaneous starters must not both unlink the
+        # stale lock and both pass O_EXCL. rename() lets exactly one win; the
+        # loser falls through and is rejected by O_EXCL as intended.
+        claim = self.path.with_name(self.path.name + f".stale-{os.getpid()}")
+        try:
+            self.path.rename(claim)
+        except FileNotFoundError:
+            return
+        try:
+            claim.unlink()
+        except FileNotFoundError:
+            pass
 
     def __exit__(self, exc_type, exc, tb) -> None:  # type: ignore[no-untyped-def]
         if self._fd is not None:
@@ -83,6 +103,8 @@ def read_latest_state(state_dir: Path) -> dict[str, Any] | None:
         with latest_path.open("r", encoding="utf-8") as fh:
             return json.load(fh)
     except (OSError, json.JSONDecodeError):
+        # A crash mid-write (see _write_json) or external corruption must not
+        # take down `status`/the dashboard; treat an unreadable file as absent.
         return None
 
 
@@ -98,6 +120,20 @@ def _read_lock_pid(path: Path) -> int | None:
 def _pid_is_running(pid: int | None) -> bool:
     if not pid or pid <= 0:
         return False
+    if os.name == "nt":
+        proc = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+            capture_output=True,
+            text=True,
+            errors="replace",
+        )
+        text = proc.stdout.strip()
+        if str(pid) not in text or text.startswith("INFO:"):
+            return False
+        # Guard against PID reuse after reboot: only a python process can be
+        # a live backup holder; any other image means the lock is stale.
+        image = text.split(",", 1)[0].strip('"').lower()
+        return image.startswith("python")
     try:
         os.kill(pid, 0)
     except OSError:
@@ -106,8 +142,11 @@ def _pid_is_running(pid: int | None) -> bool:
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    # Atomic write: a crash or full disk mid-write must never leave a truncated
+    # latest.json/run file. Write a sibling temp, flush+fsync, then os.replace
+    # (atomic on Windows and POSIX). Mirrors web_control/rpc_monitor.
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_name(path.name + ".tmp")
+    tmp_path = path.with_name(path.name + f".tmp{os.getpid()}")
     with tmp_path.open("w", encoding="utf-8") as fh:
         json.dump(payload, fh, ensure_ascii=False, indent=2)
         fh.write("\n")

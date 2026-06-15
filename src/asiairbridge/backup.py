@@ -4,6 +4,7 @@ import fnmatch
 import os
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -81,7 +82,12 @@ def build_jobs(
 def run_job(config: AppConfig, job: BackupJob, dry_run: bool) -> BackupResult:
     started_at = datetime.now().isoformat(timespec="seconds")
     port = config.backup.smb_port
-    tcp = _tcp_open_any(job.device, port)
+    tcp = _tcp_open_any(
+        job.device,
+        port,
+        retry_count=config.backup.retry_count,
+        retry_wait_seconds=config.backup.retry_wait_seconds,
+    )
     if not tcp.ok:
         finished_at = datetime.now().isoformat(timespec="seconds")
         return BackupResult(
@@ -148,13 +154,23 @@ def result_to_dict(result: BackupResult) -> dict[str, object]:
     }
 
 
-def _tcp_open_any(device: Device, port: int) -> ProbeResult:
+def _tcp_open_any(
+    device: Device,
+    port: int,
+    *,
+    retry_count: int,
+    retry_wait_seconds: int,
+) -> ProbeResult:
     failures: list[str] = []
-    for endpoint in device.endpoint_candidates():
-        result = tcp_open(endpoint.ip, port)
-        if result.ok:
-            return result
-        failures.append(f"{endpoint.label} {endpoint.ip}: {result.detail}")
+    for attempt in range(retry_count + 1):
+        failures = []
+        for endpoint in device.endpoint_candidates():
+            result = tcp_open(endpoint.ip, port, timeout_seconds=5.0)
+            if result.ok:
+                return result
+            failures.append(f"{endpoint.label} {endpoint.ip}: {result.detail}")
+        if attempt < retry_count:
+            time.sleep(retry_wait_seconds)
 
     return ProbeResult(False, "; ".join(failures))
 
@@ -174,7 +190,24 @@ def _run_copy_backend(
 ) -> CopyRunResult:
     if backend.name == "rsync" and backend.executable:
         cmd = _rsync_command(config, backend.executable, job, dry_run)
-        proc = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
+        try:
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                errors="replace",
+                timeout=config.backup.job_timeout_hours * 3600,
+            )
+        except subprocess.TimeoutExpired:
+            _write_text_log(
+                job.log_path,
+                f"rsync timed out after {config.backup.job_timeout_hours}h",
+            )
+            return CopyRunResult(
+                False,
+                None,
+                f"timed out after {config.backup.job_timeout_hours}h (rsync killed)",
+            )
         _write_process_log(job.log_path, cmd, proc)
         return CopyRunResult(proc.returncode == 0, proc.returncode, _summarize_process(proc, "rsync"))
 

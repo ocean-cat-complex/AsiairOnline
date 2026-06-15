@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ASIAIR 赤道仪</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #030404; --panel: #070909; --line: #2b3030; --line-soft: #171b1b;
+      --text: #f2f6f4; --muted: #8c9693; --cyan: #00f5ff; --green: #35ff4f;
+      --warn: #ffb300; --danger: #ff4f5e;
+      --mono: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: var(--mono); }
+    body { display: flex; }
+    .shell { width: 100%; min-height: 100vh; display: grid; grid-template-rows: 54px 1fr auto; }
+    .tgbtn { background:#101617; color:var(--muted); border:1px solid var(--line); border-radius:0;
+      padding:3px 8px; font:inherit; font-size:11px; cursor:pointer; }
+    .tgbtn.on { color: var(--cyan); border-color: var(--cyan); }
+    .badge { font-size: 12px; font-weight: 700; padding: 4px 10px; border: 1px solid var(--line); border-radius: 0; color: var(--muted); white-space: nowrap; }
+    .badge.good { color: var(--green); border-color: var(--green); }
+    .badge.bad { color: var(--danger); border-color: var(--danger); }
+    button.refresh {
+      background: #050707; color: var(--text); border: 1px solid var(--line); border-radius: 0;
+      font: 700 12px var(--mono); padding: 6px 12px; cursor: pointer;
+    }
+    button.refresh:hover { border-color: var(--cyan); color: var(--cyan); }
+
+    .grid { padding: 16px; display: grid; gap: 14px; align-content: start;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+    .panel { background: #050707; border: 1px solid var(--line); border-radius: 0; overflow: hidden; }
+    .panel.span2 { grid-column: 1 / -1; }
+    .panel-head {
+      display: flex; justify-content: space-between; align-items: center;
+      min-height: 40px; padding: 0 14px; border-bottom: 1px solid var(--line-soft);
+      font-size: 13px; font-weight: 700; color: var(--muted); background: #050707;
+    }
+    .panel-head .hint { color: var(--cyan); font-size: 12px; }
+
+    .readouts { display: grid; grid-template-columns: repeat(3, 1fr); }
+    .readout { padding: 14px; border-right: 1px solid var(--line-soft); }
+    .readout:last-child { border-right: 0; }
+    .rl { color: var(--muted); font-size: 12px; }
+    .rv { margin-top: 8px; font-size: 25px; font-weight: 700; color: var(--cyan); letter-spacing: 1px; }
+    .rv.small { font-size: 18px; color: var(--text); }
+
+    .kv { padding: 6px 0; }
+    .kv .row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 9px 14px; border-bottom: 1px solid var(--line-soft); }
+    .kv .row:last-child { border-bottom: 0; }
+    .kv .k { color: var(--muted); font-size: 12px; }
+    .kv .v { font-size: 14px; font-weight: 700; color: var(--cyan); text-align: right; overflow-wrap: anywhere; }
+    .v.on { color: var(--green); } .v.off { color: var(--muted); }
+    .v.warn { color: var(--warn); } .v.cyan { color: var(--cyan); }
+
+    .caps { padding: 12px 14px; display: flex; flex-wrap: wrap; gap: 8px; }
+    .cap { font-size: 12px; font-weight: 700; color: var(--text); border: 1px solid var(--line); border-radius: 0; padding: 4px 10px; }
+    .raw { margin: 0; padding: 12px 14px; font-size: 12px; color: var(--muted); white-space: pre-wrap; max-height: 240px; overflow: auto; }
+
+    .notice { grid-column: 1 / -1; padding: 14px 16px; border: 1px solid var(--warn); border-radius: 0; color: var(--warn); font-weight: 700; font-size: 14px; display: none; }
+    .notice.show { display: block; }
+
+    .footer { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; border-top: 1px solid var(--line); background: #020303; min-height: 36px; }
+    .logline { display: flex; gap: 12px; padding: 0 14px; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; }
+    #status-kind { color: var(--green); }
+    #snapshot { padding: 0 14px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header id="app-topbar"></header>
+    <script src="/topbar.js"></script>
+
+    <section class="grid">
+      <div id="notice" class="notice">赤道仪未连接 —— 请在 ASIAIR 中连接赤道仪后自动显示。</div>
+
+      <section class="panel span2">
+        <div class="panel-head"><span>实时天球 · 设备姿态 3D</span><span class="hint" style="display:flex; gap:8px; align-items:center;">
+          <span id="conn" class="badge">检测中…</span>
+          <button id="refresh-btn" class="refresh" type="button">刷新</button>
+          <button id="tg-eq" class="tgbtn on" type="button">赤道网格</button>
+          <button id="tg-alt" class="tgbtn" type="button">地平网格</button>
+          <button id="tg-gnd" class="tgbtn on" type="button">地面</button>
+          <span>GPU 渲染 · 随指向实时更新 · 只读</span>
+        </span></div>
+        <div style="display:flex; justify-content:center; align-items:center; background:radial-gradient(circle at 50% 40%, #0a0e0e, #040606); min-height:340px; padding:10px;">
+          <img id="mount3d" alt="实时天球与赤道仪姿态" draggable="false" style="max-width:100%; width:720px; display:none; cursor:grab; touch-action:none; user-select:none;" />
+          <span id="mount3d-empty" style="color:var(--muted); font-size:13px;">等待赤道仪指向数据…</span>
+        </div>
+      </section>
+
+      <section class="panel span2 position-panel">
+        <div class="panel-head"><span>当前位置 (J2000 / JNow)</span><span id="pos-hint" class="hint"></span></div>
+        <div class="readouts">
+          <div class="readout"><div class="rl">赤经 RA</div><div class="rv" id="ra">--</div></div>
+          <div class="readout"><div class="rl">赤纬 Dec</div><div class="rv" id="dec">--</div></div>
+          <div class="readout"><div class="rl">本地恒星时 LST</div><div class="rv small" id="lst">--</div></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><span>跟踪与运动</span></div>
+        <div class="kv">
+          <div class="row"><span class="k">跟踪 Tracking</span><span class="v" id="tracking">--</span></div>
+          <div class="row"><span class="k">运动 Motion</span><span class="v" id="moving">--</span></div>
+          <div class="row"><span class="k">中天侧 Pier side</span><span class="v" id="pierside">--</span></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><span>目标 (Goto)</span><span id="goto-hint" class="hint"></span></div>
+        <div class="kv">
+          <div class="row"><span class="k">目标 Target</span><span class="v" id="t-name">--</span></div>
+          <div class="row"><span class="k">目标 RA</span><span class="v" id="t-ra">--</span></div>
+          <div class="row"><span class="k">目标 Dec</span><span class="v" id="t-dec">--</span></div>
+          <div class="row"><span class="k">角度 Angle</span><span class="v" id="t-angle">--</span></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><span>站点 Site</span></div>
+        <div class="kv">
+          <div class="row"><span class="k">纬度 Lat</span><span class="v" id="lat">--</span></div>
+          <div class="row"><span class="k">经度 Lng</span><span class="v" id="lng">--</span></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><span>赤道仪能力 Capabilities</span></div>
+        <div id="caps" class="caps"></div>
+      </section>
+
+      <section class="panel span2">
+        <div class="panel-head"><span>原始数据 Raw</span><span class="hint">只读 · read-only</span></div>
+        <pre id="raw" class="raw">--</pre>
+      </section>
+    </section>
+
+    <footer class="footer">
+      <div class="logline"><span id="status-kind">[—]</span><span id="status-text">等待赤道仪数据</span></div>
+      <span></span>
+      <span id="snapshot">--</span>
+    </footer>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    let skyEq = 1, skyAlt = 0, skyGnd = 1, lastMountData = null;
+    let vAz = -90, vEl = 8, vFov = 35, lastDragRender = 0;
+    function updateRig(d) {
+      if (!d) return;
+      const p0 = d.position || {}, s0 = d.site || {}, t0 = d.target || {};
+      const rr = (v, n) => (v == null ? "" : Number(v).toFixed(n));
+      if (d.connected && p0.ra_hours != null) {
+        const u = new URLSearchParams({ ra: rr(p0.ra_hours, 3), dec: rr(p0.dec_degrees, 2),
+          lst: rr(p0.lst_hours, 2), pier: d.pier_side || "",
+          lat: rr(s0.lat != null ? s0.lat : 40, 1), size: 760,
+          sky: 1, eqgrid: skyEq, altgrid: skyAlt, ground: skyGnd, az: vAz.toFixed(1), el: vEl.toFixed(1), fov: vFov.toFixed(0) });
+        if (t0.ra_hours != null) { u.set("tra", rr(t0.ra_hours, 3)); u.set("tdec", rr(t0.dec_degrees, 2)); }
+        const url = "/api/mount-render?" + u.toString();
+        const img = $("mount3d");
+        if (img.getAttribute("src") !== url) img.src = url;
+        img.style.display = ""; $("mount3d-empty").style.display = "none";
+      } else {
+        $("mount3d").style.display = "none"; $("mount3d-empty").style.display = "";
+      }
+    }
+    $("tg-eq").addEventListener("click", () => { skyEq = skyEq ? 0 : 1; $("tg-eq").classList.toggle("on", !!skyEq); updateRig(lastMountData); });
+    $("tg-alt").addEventListener("click", () => { skyAlt = skyAlt ? 0 : 1; $("tg-alt").classList.toggle("on", !!skyAlt); updateRig(lastMountData); });
+    $("tg-gnd").addEventListener("click", () => { skyGnd = skyGnd ? 0 : 1; $("tg-gnd").classList.toggle("on", !!skyGnd); updateRig(lastMountData); });
+    (() => {
+      const img = $("mount3d");
+      let drag = null;
+      img.addEventListener("pointerdown", e => { drag = { x: e.clientX, y: e.clientY, az: vAz, el: vEl };
+        img.style.cursor = "grabbing"; img.setPointerCapture(e.pointerId); e.preventDefault(); });
+      img.addEventListener("pointermove", e => {
+        if (!drag) return;
+        vAz = drag.az - (e.clientX - drag.x) * 0.4;
+        vEl = Math.max(-5, Math.min(80, drag.el + (e.clientY - drag.y) * 0.25));
+        vAz = ((vAz + 180) % 360 + 360) % 360 - 180;
+        const now = Date.now();
+        if (now - lastDragRender > 70) { lastDragRender = now; updateRig(lastMountData); }
+      });
+      img.addEventListener("pointerup", () => { drag = null; img.style.cursor = "grab"; updateRig(lastMountData); });
+      let wheelTimer = null;
+      img.addEventListener("wheel", e => {
+        e.preventDefault();
+        vFov = Math.max(12, Math.min(75, vFov + (e.deltaY > 0 ? 4 : -4)));
+        const now = Date.now();
+        if (now - lastDragRender > 70) { lastDragRender = now; updateRig(lastMountData); }
+        clearTimeout(wheelTimer);
+        wheelTimer = setTimeout(() => updateRig(lastMountData), 120);
+      }, { passive: false });
+    })();
+    const DEVICE = new URLSearchParams(location.search).get("device") || "";
+
+    function setText(id, value, cls) {
+      const el = $(id);
+      if (!el) return;
+      el.textContent = (value === null || value === undefined || value === "") ? "--" : value;
+      if (cls !== undefined) el.className = "v " + cls;
+    }
+
+    function render(d) {
+      const connected = !!d.connected;
+      $("notice").classList.toggle("show", d.ok && !connected);
+      $("conn").textContent = connected ? "已连接" : (d.ok ? "未连接" : "无响应");
+      $("conn").className = "badge " + (connected ? "good" : "bad");
+
+      lastMountData = d;
+      updateRig(d);
+
+      const p = d.position || {};
+      setText("ra", connected ? p.ra_text : "--");
+      setText("dec", connected ? p.dec_text : "--");
+      setText("lst", connected ? p.lst_text : "--");
+      $("pos-hint").textContent = connected && p.ra_hours != null ? `RA ${(+p.ra_hours).toFixed(4)}h · Dec ${(+p.dec_degrees).toFixed(4)}°` : "";
+
+      setText("tracking", d.tracking === true ? "开启" : d.tracking === false ? "关闭" : "--", d.tracking === true ? "on" : "off");
+      setText("moving", d.moving_text || "--", d.is_moving ? "warn" : "off");
+      setText("pierside", d.pier_side_text || "--", "cyan");
+
+      const t = d.target || {};
+      setText("t-name", t.name || "--", "cyan");
+      setText("t-ra", t.ra_text || "--");
+      setText("t-dec", t.dec_text || "--");
+      setText("t-angle", t.angle != null ? `${(+t.angle).toFixed(2)}°` : "--");
+      $("goto-hint").textContent = t.slewing ? "转向中…" : "";
+
+      const s = d.site || {};
+      setText("lat", s.lat_text || "--");
+      setText("lng", s.lng_text || "--");
+
+      const caps = $("caps");
+      caps.innerHTML = "";
+      (d.capabilities || []).forEach((c) => {
+        const el = document.createElement("span");
+        el.className = "cap";
+        el.textContent = c;
+        caps.appendChild(el);
+      });
+
+      $("raw").textContent = JSON.stringify(d.raw || {}, null, 2);
+      const kind = !d.ok ? "ERR" : connected ? "OK" : "WARN";
+      $("status-kind").textContent = `[${kind}]`;
+      $("status-kind").style.color = !d.ok ? "#ff4f5e" : connected ? "#35ff4f" : "#ffb300";
+      $("status-text").textContent = !d.ok ? (d.error || "查询失败") : connected ? `赤道仪在线 · ${d.device && d.device.name}` : "赤道仪未连接";
+      $("snapshot").textContent = d.snapshot_at || "--";
+    }
+
+    async function poll() {
+      try {
+        const q = DEVICE ? `?device=${encodeURIComponent(DEVICE)}` : "";
+        const r = await fetch(`/api/mount-state${q}`, { cache: "no-store" });
+        render(await r.json());
+      } catch (e) {
+        $("conn").textContent = "无响应"; $("conn").className = "badge bad";
+      }
+    }
+
+    $("refresh-btn").addEventListener("click", poll);
+
+    (function init() {
+      poll();
+      setInterval(poll, 2000);
+    })();
+  </script>
+</body>
+</html>

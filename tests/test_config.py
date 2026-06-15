@@ -62,6 +62,9 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(str(source.render(device)), "/Volumes/pier-a/EMMC Images")
             self.assertEqual(config.display_path(root / "state" / "backups" / "pier-a"), ".../pier-a")
             self.assertEqual(device.endpoint_ips(), ("192.168.8.10", "192.168.8.20"))
+            self.assertEqual(config.backup.retry_count, 2)
+            self.assertEqual(config.backup.retry_wait_seconds, 5)
+            self.assertEqual(config.backup.job_timeout_hours, 6)
 
     def test_root_level_config_uses_its_own_directory_as_project_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

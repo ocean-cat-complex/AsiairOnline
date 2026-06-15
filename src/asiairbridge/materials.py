@@ -61,6 +61,7 @@ class MaterialLibrary:
         self.preview_dir = self.state_dir / "previews"
         self.db_path = self.state_dir / "materials.db"
         self._lock = threading.RLock()
+        self._rescan_pending = False
         self._preview_lock_guard = threading.Lock()
         self._preview_locks: dict[str, threading.Lock] = {}
         self._preview_semaphore = threading.BoundedSemaphore(1)
@@ -145,7 +146,12 @@ class MaterialLibrary:
     def start_scan(self, force: bool = False) -> dict[str, Any]:
         with self._lock:
             if self._scan_status.get("running"):
-                return self.scan_status()
+                # Queue one follow-up pass instead of dropping the request —
+                # the post-backup trigger must not be lost to an in-flight scan.
+                self._rescan_pending = True
+                status = self.scan_status()
+                status["queued"] = True
+                return status
             self._scan_status = {
                 "running": True,
                 "started_at": datetime.now().isoformat(timespec="seconds"),
@@ -164,7 +170,14 @@ class MaterialLibrary:
         seen: set[str] = set()
         indexed = 0
         scanned = 0
+        scan_started = datetime.now().isoformat(timespec="seconds")
         try:
+            # Sweep preview temp files orphaned by a crash mid-generation.
+            try:
+                for stale in self.preview_dir.rglob("*.tmp.jpg"):
+                    stale.unlink()
+            except OSError:
+                pass
             self._init_db()
             if not self.root.exists():
                 raise FileNotFoundError(str(self.root))
@@ -183,15 +196,23 @@ class MaterialLibrary:
                     if indexed % 500 == 0:
                         conn.commit()
                         conn.execute("BEGIN")
-                if seen:
-                    placeholders = ",".join("?" for _ in seen)
-                    conn.execute(f"DELETE FROM materials WHERE id NOT IN ({placeholders})", tuple(seen))
-                else:
-                    conn.execute("DELETE FROM materials")
+                if scanned == 0:
+                    # An empty walk (root unreachable / transient FS error)
+                    # must not wipe a previously healthy index.
+                    raise FileNotFoundError(f"scan found no files under {self.root}")
+                # Watermark purge: every row seen this scan was upserted with a
+                # fresh indexed_at >= scan_started; older rows are gone from
+                # disk. Avoids the ~32k SQLite bound-variable limit of NOT IN.
+                conn.execute("DELETE FROM materials WHERE indexed_at < ?", (scan_started,))
                 conn.commit()
             self._finish_scan(scanned=scanned, indexed=indexed, error=None)
         except Exception as exc:  # noqa: BLE001
             self._finish_scan(scanned=scanned, indexed=indexed, error=str(exc))
+        with self._lock:
+            pending = self._rescan_pending
+            self._rescan_pending = False
+        if pending:
+            self.start_scan(force=True)
 
     def _iter_material_files(self) -> Any:
         for root, dirs, files in os.walk(self.root):

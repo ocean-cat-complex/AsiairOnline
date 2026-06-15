@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ASIAIR OPS · 总览</title>
+<script src="ops-theme.js"></script>
+<style>
+/* ── 页面骨架:全屏星空背景 + 三段式悬浮内容 ── */
+#bg{position:fixed;inset:0;width:100vw;height:100vh;z-index:0}
+.wrap{position:relative;z-index:2;min-height:100vh;display:grid;
+  grid-template-columns:minmax(0,1fr) 330px;grid-template-rows:auto auto 1fr auto;
+  grid-template-areas:"pulse pulse" "fleet rail" "logs rail" "foot foot";
+  gap:0 30px;padding:78px 26px 14px;max-width:1500px;margin:0 auto}
+
+/* 台站脉搏 */
+.pulse{grid-area:pulse;display:flex;align-items:flex-end;gap:46px;flex-wrap:wrap;
+  padding:14px 0 20px;border-bottom:1px solid var(--line)}
+.pl .lab{font-size:11px}
+.pl .bignum{margin-top:4px;font-size:38px}
+html[data-skin="B"] .pl .bignum{font-size:44px}
+.pl .sub{font:400 11px var(--mono);color:var(--quiet);margin-top:2px}
+.pulse .title{margin-right:auto}
+.pulse .title h1{margin:0;font:var(--lab-w) 26px var(--display);letter-spacing:.1em}
+html[data-skin="B"] .pulse .title h1{font:500 34px var(--display);letter-spacing:.06em}
+html[data-skin="C"] .pulse .title h1{font:300 28px var(--display);letter-spacing:.02em}
+.pulse .title .sub{font:italic 300 12px var(--body);color:var(--muted);margin-top:3px}
+html[data-skin="A"] .pulse .title .sub,html[data-skin="C"] .pulse .title .sub{font-style:normal}
+
+/* 舰队 */
+.fleet{grid-area:fleet;display:grid;gap:26px;align-content:start;
+  grid-template-columns:repeat(auto-fill,minmax(250px,1fr));padding:22px 0}
+.station{position:relative;padding:14px 2px 10px;cursor:pointer;border-top:2px solid var(--line)}
+.station:hover{border-top-color:var(--muted)}
+.station.sel{border-top-color:var(--ac)}
+.station .dv{display:flex;align-items:baseline;gap:10px}
+.station .dv b{font:var(--lab-w) 18px var(--display);letter-spacing:.12em}
+html[data-skin="B"] .station .dv b{font:600 20px var(--display)}
+.station .dv .ip{font:400 10.5px var(--mono);color:var(--quiet)}
+.station .cam{margin-top:2px;font:400 11.5px var(--mono);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.station .strip{display:flex;align-items:center;gap:14px;margin-top:10px}
+.ring{width:58px;height:58px;flex:none}
+.station .kv{flex:1;min-width:0}
+.station .kv .hrow{padding:2.5px 0}
+.station .bar{margin-top:9px;height:2px;background:var(--line-dim);position:relative}
+.station .bar i{position:absolute;left:0;top:0;bottom:0;background:var(--ac);transition:width .8s cubic-bezier(.2,.7,.3,1)}
+.station .bar span{position:absolute;right:0;top:-16px;font:400 10px var(--mono);color:var(--quiet)}
+.station .sig{position:absolute;right:2px;top:12px}
+
+/* 右栏:选中设备 */
+.rail{grid-area:rail;border-left:1px solid var(--ac-soft);padding:22px 0 10px 20px;
+  align-self:start;position:sticky;top:64px;max-height:calc(100vh - 80px);overflow:auto;scrollbar-width:none;
+  background:linear-gradient(270deg,var(--scrim) 60%,var(--scrim0))}
+.rail::-webkit-scrollbar{display:none}
+html[data-skin="C"] .rail{border-left-color:var(--line)}
+.rail .devname{font:var(--lab-w) 13px var(--display);letter-spacing:.22em;color:var(--ac);text-transform:var(--lab-tt)}
+.rail h2{margin:2px 0 12px;font:var(--lab-w) 20px var(--display);letter-spacing:.08em}
+html[data-skin="B"] .rail h2{font:500 24px var(--display)}
+.cat{padding:7px 0;border-bottom:1px solid var(--line-dim);cursor:pointer}
+.cat-head{display:flex;align-items:baseline;gap:9px}
+.cat-head .lampline{flex:none}
+.cat-head .nm{font:var(--lab-w) 12px var(--display);letter-spacing:.12em;color:var(--text);text-transform:var(--lab-tt)}
+.cat-head .ct{margin-left:auto;font:400 11px var(--mono);color:var(--quiet)}
+.cat-items{display:none;padding:6px 0 2px 16px}
+.cat.open .cat-items{display:block}
+.cat-items .hrow .k{letter-spacing:.04em;text-transform:none;font-family:var(--body)}
+.cat-items .hrow{padding:2.5px 0}
+
+/* 日志流 */
+.logs{grid-area:logs;padding:8px 0 12px;display:flex;flex-direction:column}
+.logs .lhead{display:flex;align-items:center;gap:12px;padding:8px 0;border-top:1px solid var(--line)}
+.logs .lhead b{font:var(--lab-w) 12px var(--display);letter-spacing:.24em;color:var(--ac);text-transform:var(--lab-tt)}
+.loglines{height:170px;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end;-webkit-mask-image:linear-gradient(180deg,transparent,#000 28%);mask-image:linear-gradient(180deg,transparent,#000 28%);
+  font:12px/1.85 var(--mono);color:var(--muted)}
+.loglines .ln{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.loglines .ln .t{color:var(--quiet)}
+.loglines .ln .tag{color:var(--good)}
+.loglines .ln .tag.w{color:var(--warn)}
+.loglines .ln:last-child{color:var(--text)}
+@media (prefers-reduced-motion:no-preference){
+  .loglines .ln{animation:lnIn .4s ease-out}
+  @keyframes lnIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+}
+.foot{grid-area:foot}
+
+@media (max-width:1000px){
+  .wrap{grid-template-columns:1fr;grid-template-areas:"pulse" "fleet" "rail" "logs" "foot"}
+  .rail{position:static;max-height:none;border-left:0;border-top:1px solid var(--ac-soft);padding:16px 0 0;background:none}
+}
+</style>
+</head>
+<body>
+<canvas id="bg" aria-hidden="true"></canvas>
+
+<main class="wrap">
+  <section class="pulse seq">
+    <div class="title">
+      <h1>台站总览</h1>
+      <div class="sub" id="gen-at">读取台站状态…</div>
+    </div>
+    <div class="pl"><div class="lab">设备在线</div><div class="bignum" id="n-online">--</div><div class="sub">/ <span id="n-total">-</span> 台</div></div>
+    <div class="pl"><div class="lab">正在采集</div><div class="bignum" id="n-capturing">--</div><div class="sub" id="cap-sub">--</div></div>
+    <div class="pl"><div class="lab">接口健康</div><div class="bignum" id="n-health">--</div><div class="sub" id="health-sub">--</div></div>
+    <div class="pl"><div class="lab">主站存储</div><div class="bignum" id="n-storage">--</div><div class="sub" id="storage-sub">剩余</div></div>
+  </section>
+
+  <section class="fleet seq d1" id="fleet" aria-label="设备舰队"></section>
+
+  <aside class="rail seq d2" id="rail">
+    <div class="devname" id="rail-dev">--</div>
+    <h2>重点遥测</h2>
+    <div id="rail-high"></div>
+    <div id="rail-cats" style="margin-top:14px"></div>
+  </aside>
+
+  <section class="logs seq d3">
+    <div class="lhead"><b>站务日志</b><span class="con-note" id="log-note">由各接口实时事件汇成 · 只读</span></div>
+    <div class="loglines" id="loglines"></div>
+  </section>
+
+  <footer class="statusline foot seq d3">
+    <span class="kind" id="status-kind" style="color:var(--good)">[—]</span>
+    <span class="msg" id="status-text">连接台站…</span>
+    <span class="ts" id="snapshot">--</span>
+  </footer>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+const OPS=window.OPS;
+let fleetData=null, monitorData=null, selDev=null;
+const ringRegistry=new Map();   // device -> {canvas, progress, shown}
+
+/* ── 背景星空:轻量漂移 + 闪烁 ── */
+(function bg(){
+  const cv=$("bg"),ctx=cv.getContext("2d");
+  const REDUCED=matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let stars=[];
+  function seed(){
+    const n=Math.round(innerWidth*innerHeight/9000);
+    let s=42;const rnd=()=>{s^=s<<13;s^=s>>>17;s^=s<<5;return((s>>>0)/4294967296);};
+    stars=Array.from({length:n},()=>({x:rnd(),y:rnd(),m:rnd(),ph:rnd()*6.28,sp:.4+rnd()}));
+  }
+  seed();addEventListener("resize",seed);
+  function cssVar(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim();}
+  function draw(t){
+    const w=innerWidth,h=innerHeight,dpr=devicePixelRatio||1;
+    if(cv.width!==w*dpr||cv.height!==h*dpr){cv.width=w*dpr;cv.height=h*dpr;}
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.fillStyle=cssVar("--sky-bg");ctx.fillRect(0,0,w,h);
+    ctx.fillStyle=cssVar("--sky-star");
+    const drift=REDUCED?0:(t/1000)*0.0016;
+    for(const st of stars){
+      const x=((st.x+drift*st.sp)%1)*w, y=st.y*h;
+      const tw=REDUCED?1:(.7+.3*Math.sin(t/1000*st.sp+st.ph));
+      ctx.globalAlpha=(.12+st.m*.4)*tw;
+      ctx.beginPath();ctx.arc(x,y,st.m>.93?1.6:st.m>.7?1.1:.7,0,7);ctx.fill();
+    }
+    ctx.globalAlpha=1;
+    requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(draw);
+})();
+
+/* ── 数字滚动 ── */
+function countUp(el,target,fmt){
+  const from=parseFloat(el.dataset.cur||"0")||0;
+  const to=+target||0;
+  el.dataset.cur=to;
+  if(matchMedia("(prefers-reduced-motion: reduce)").matches){el.textContent=fmt(to);return;}
+  const t0=performance.now(),dur=700;
+  (function step(t){
+    const p=Math.min(1,(t-t0)/dur),e=1-Math.pow(1-p,3);
+    el.textContent=fmt(from+(to-from)*e);
+    if(p<1)requestAnimationFrame(step);
+  })(t0);
+}
+
+/* ── 进度环 ── */
+function drawRing(cv,progress,active){
+  const dpr=devicePixelRatio||1,s=58;
+  if(cv.width!==s*dpr){cv.width=cv.height=s*dpr;}
+  const ctx=cv.getContext("2d");ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,s,s);
+  const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  ctx.lineWidth=2;ctx.strokeStyle=css("--line");
+  ctx.beginPath();ctx.arc(s/2,s/2,24,0,7);ctx.stroke();
+  if(progress!=null){
+    ctx.lineWidth=2.5;ctx.strokeStyle=css("--ac");
+    ctx.beginPath();ctx.arc(s/2,s/2,24,-Math.PI/2,-Math.PI/2+Math.PI*2*Math.min(1,progress));ctx.stroke();
+  }
+  ctx.fillStyle=active?css("--ac"):css("--quiet");
+  ctx.font=`600 11px ${css("--mono")}`;ctx.textAlign="center";ctx.textBaseline="middle";
+  ctx.fillText(progress!=null?Math.round(progress*100)+"%":"待机",s/2,s/2);
+}
+function animateRings(){
+  for(const [,r] of ringRegistry){
+    if(r.target==null){r.shown=null;}
+    else{
+      if(r.shown==null)r.shown=0;
+      r.shown+= (r.target-r.shown)*0.12;
+      if(Math.abs(r.target-r.shown)<.002)r.shown=r.target;
+    }
+    drawRing(r.canvas,r.shown,r.active);
+  }
+  requestAnimationFrame(animateRings);
+}
+requestAnimationFrame(animateRings);
+OPS.onSkin(()=>{ /* 皮肤切换时环色随 CSS 变量自动更新,无需处理 */ });
+
+/* ── 舰队渲染 ── */
+function stateText(app){
+  if(!app)return["未知",""];
+  if(app.capture_working)return["采集中","warn"];
+  const m={idle:"待机",preview:"预览",plan:"计划",autorun:"自动运行",focus:"对焦",guide:"导星",stack:"叠加"};
+  return[(m[app.capture_state]||app.capture_state||"待机")+" · "+(m[app.page]||app.page||""),app.capture_working?"warn":"on"];
+}
+function renderFleet(){
+  const root=$("fleet");
+  const devices=fleetData&&fleetData.devices?Object.entries(fleetData.devices):[];
+  if(!devices.length){root.innerHTML=`<div class="con-note">未取得设备快照</div>`;return;}
+  if(!selDev)selDev=(OPS.device&&fleetData.devices[OPS.device])?OPS.device
+    :(monitorData&&monitorData.device&&fleetData.devices[monitorData.device.name])?monitorData.device.name
+    :devices[0][0];
+  root.innerHTML="";ringRegistry.clear();
+  for(const [name,d] of devices){
+    const cam=d.camera||{},app=d.app||{},ctl=d.controls||{},exp=d.exposure||{};
+    const [stxt,scls]=stateText(app);
+    const el=document.createElement("article");
+    el.className="station"+(name===selDev?" sel":"");
+    el.innerHTML=`
+      <span class="sig lampline ${d.ok?(app.capture_working?"warn":"on"):"bad"}"><i></i></span>
+      <div class="dv"><b>${name}</b><span class="ip num">${(d.device&&d.device.ip)||""}</span></div>
+      <div class="cam">${cam.name||"相机未连接"}</div>
+      <div class="strip">
+        <canvas class="ring" width="58" height="58" aria-label="采集进度"></canvas>
+        <div class="kv">
+          <div class="hrow"><span class="k">状态</span><span class="v ${scls==="warn"?"ac":""}">${stxt}</span></div>
+          <div class="hrow"><span class="k">传感器</span><span class="v">${ctl.temperature?ctl.temperature.display:"--"} · 制冷 ${ctl.cool_power?ctl.cool_power.display:"--"}</span></div>
+          <div class="hrow"><span class="k">曝光</span><span class="v">${exp.seconds!=null?exp.seconds+" s · Bin"+(exp.bin||1):"--"}</span></div>
+        </div>
+      </div>
+      <div class="bar"><i style="width:0%"></i><span></span></div>`;
+    const ring=el.querySelector(".ring");
+    const prog=app.capture_working?(app.capture_progress!=null?app.capture_progress:null):null;
+    ringRegistry.set(name,{canvas:ring,target:prog,shown:prog!=null?0:null,active:!!app.capture_working});
+    /* 存储条:image.free 信息在 camera-state 顶层无,使用 rpc highlights 仅选中设备;此处用 cache/d.image? 退化:隐藏 */
+    const bar=el.querySelector(".bar");
+    const st=d.storage||null;
+    if(st&&st.total_mb){const used=1-st.free_mb/st.total_mb;
+      bar.querySelector("i").style.width=(used*100).toFixed(1)+"%";
+      bar.querySelector("span").textContent=`存储 ${OPS.fmtBytes(st.free_mb*1048576)} 余`;}
+    else bar.style.display="none";
+    el.addEventListener("click",()=>{selDev=name;renderFleet();renderRail();loadMonitorFor(name);});
+    root.appendChild(el);
+  }
+}
+
+/* ── 右栏 ── */
+function railRow(k,v,ac){return `<div class="hrow"><span class="k">${k}</span><span class="v ${ac?"ac":""}">${v==null||v===""?"--":v}</span></div>`;}
+function renderRail(){
+  $("rail-dev").textContent="设备 · "+(selDev||"--");
+  const d=fleetData&&fleetData.devices&&fleetData.devices[selDev];
+  const hi=monitorData&&monitorData.device&&monitorData.device.name===selDev?monitorData.highlights:null;
+  let html="";
+  if(d){
+    const app=d.app||{},cam=d.camera||{},ctl=d.controls||{},exp=d.exposure||{};
+    html+=`<div class="hgroup"><h3><span class="rn">Ⅰ</span>相机</h3>`;
+    html+=railRow("型号",cam.name,true);
+    html+=railRow("芯片",cam.chip_size?cam.chip_size.join(" × "):"--");
+    html+=railRow("像元",cam.pixel_size_um?cam.pixel_size_um+" µm":"--");
+    html+=railRow("温度",ctl.temperature?ctl.temperature.display:"--");
+    html+=railRow("制冷功率",ctl.cool_power?ctl.cool_power.display:"--");
+    html+=railRow("Gain / Offset",(ctl.gain?ctl.gain.display:"--")+" / "+(ctl.offset?ctl.offset.display:"--"));
+    html+=`</div><div class="hgroup"><h3><span class="rn">Ⅱ</span>采集</h3>`;
+    const [stxt]=stateText(app);
+    html+=railRow("状态",stxt,app.capture_working);
+    html+=railRow("曝光设置",exp.seconds!=null?exp.seconds+" s · Bin"+(exp.bin||1):"--");
+    if(hi){
+      html+=railRow("目标",hi.target_name||"--",!!hi.target_name);
+      html+=railRow("序列进度",hi.sequence_progress||"--");
+      html+=railRow("存储",hi.storage_free_mb!=null?OPS.fmtBytes(hi.storage_free_mb*1048576)+" 余":"--");
+    }
+    html+=`</div>`;
+  }
+  $("rail-high").innerHTML=html||`<div class="con-note">该设备暂无快照</div>`;
+
+  /* 类目健康(rpc-monitor 仅覆盖其轮询设备) */
+  const cats=(monitorData&&monitorData.device&&monitorData.device.name===selDev)?(monitorData.categories||[]):[];
+  const root=$("rail-cats");root.innerHTML=cats.length?`<h3 class="lab" style="font-size:11px;margin:0 0 6px">接口分类 · ${selDev}</h3>`:"";
+  for(const c of cats){
+    const bad=(c.fail_count||0)>0;
+    const el=document.createElement("div");
+    el.className="cat";
+    el.innerHTML=`<div class="cat-head">
+        <span class="lampline ${bad?"bad":"on"}"><i></i></span>
+        <span class="nm">${c.label||c.id}</span>
+        <span class="ct num">${c.ok_count||0}/${c.total_count||0}${c.stale_count?` · 滞后 ${c.stale_count}`:""}</span>
+      </div>
+      <div class="cat-items">${(c.items||[]).slice(0,8).map(it=>
+        `<div class="hrow"><span class="k">${it.label||it.method}</span><span class="v ${it.ok?"":"dim"}">${(it.display_value??"--")}</span></div>`).join("")}</div>`;
+    el.addEventListener("click",()=>el.classList.toggle("open"));
+    root.appendChild(el);
+  }
+}
+
+/* ── 台站脉搏 ── */
+function renderPulse(){
+  const devs=fleetData&&fleetData.devices?Object.values(fleetData.devices):[];
+  const online=devs.filter(d=>d.ok).length;
+  const capturing=devs.filter(d=>d.app&&d.app.capture_working).length;
+  countUp($("n-online"),online,v=>Math.round(v));
+  $("n-total").textContent=devs.length||"-";
+  countUp($("n-capturing"),capturing,v=>Math.round(v));
+  $("cap-sub").textContent=capturing?devs.filter(d=>d.app&&d.app.capture_working).map((d,i)=>d.device.name).join(" · "):"全部待机";
+  const sm=monitorData&&monitorData.summary;
+  if(sm){
+    countUp($("n-health"),sm.ok_count,v=>Math.round(v));
+    $("health-sub").textContent=`/ ${sm.total_count} 接口${sm.fail_count?` · 失败 ${sm.fail_count}`:""}`;
+  }
+  const hi=monitorData&&monitorData.highlights;
+  if(hi&&hi.storage_free_mb!=null){
+    countUp($("n-storage"),hi.storage_free_mb/1024,v=>v.toFixed(1));
+    $("storage-sub").textContent=`GB 余 / ${(hi.storage_total_mb/1024).toFixed(0)} GB · ${monitorData.device.name}`;
+  }
+  $("gen-at").textContent=`快照 ${ (monitorData&&monitorData.generated_at)||(fleetData&&fleetData.snapshot_at)||"--" } · 只读监控`;
+}
+
+/* ── 日志流:由真实条目事件汇成 ── */
+const logQ=[];let logTimer=null;
+function buildLogQueue(){
+  logQ.length=0;
+  const cats=(monitorData&&monitorData.categories)||[];
+  const evts=[];
+  for(const c of cats)for(const it of (c.items||[])){
+    if(it.updated_at)evts.push({t:it.updated_at,tag:"OK",msg:`${it.label||it.method} → ${String(it.display_value??"").slice(0,46)}`});
+    if(it.last_error)evts.push({t:it.last_error_at||it.updated_at,tag:"WARN",msg:`${it.label||it.method}:${String(it.last_error).slice(0,52)}`});
+  }
+  evts.sort((a,b)=>String(a.t).localeCompare(String(b.t)));
+  logQ.push(...evts.slice(-60));
+}
+function pushLog(e){
+  const box=$("loglines");
+  const ln=document.createElement("div");ln.className="ln";
+  ln.innerHTML=`<span class="t num">${String(e.t).replace("T"," ").slice(5,19)}</span>  <span class="tag ${e.tag==="WARN"?"w":""}">[${e.tag}]</span> ${e.msg}`;
+  box.appendChild(ln);
+  while(box.children.length>9)box.removeChild(box.firstChild);
+}
+function startLog(){
+  clearInterval(logTimer);
+  $("loglines").innerHTML="";
+  logQ.slice(0,6).forEach(pushLog);
+  let i=6;
+  logTimer=setInterval(()=>{
+    if(i<logQ.length)pushLog(logQ[i++]);
+    else{const d=new Date();
+      pushLog({t:d.toISOString().slice(0,19),tag:"OK",msg:`心跳 · ${selDev||"台站"} 链路正常 · 轮询 ${monitorData?monitorData.poll_interval_ms+"ms":"--"}`});}
+  },3400);
+}
+
+/* ── 拉取 ── */
+async function loadMonitorFor(dev){
+  try{monitorData=await OPS.fetchJSON("/api/rpc-monitor?device="+encodeURIComponent(dev||""));
+    renderPulse();renderRail();}catch(e){}
+}
+async function load(){
+  if(OPS.hidden())return;
+  try{
+    const [fleet,mon]=await Promise.allSettled([
+      OPS.fetchJSON("/api/camera-states"),
+      OPS.fetchJSON("/api/rpc-monitor?device="+encodeURIComponent(selDev||OPS.device||"")),
+    ]);
+    if(fleet.status==="fulfilled")fleetData=fleet.value;
+    if(mon.status==="fulfilled")monitorData=mon.value;
+    if(!fleetData&&!monitorData)throw new Error("台站接口不可达");
+    renderPulse();renderFleet();renderRail();
+    if(!logTimer){buildLogQueue();startLog();}
+    $("status-kind").textContent="[OK]";$("status-kind").style.color="var(--good)";
+    $("status-text").textContent=`台站在线 · 轮询 ${monitorData?monitorData.poll_interval_ms:"--"} ms · ${monitorData&&monitorData.safety?monitorData.safety.mode:""}`;
+    $("snapshot").textContent=(monitorData&&monitorData.generated_at)||"--";
+  }catch(e){
+    $("status-kind").textContent="[ERR]";$("status-kind").style.color="var(--bad)";
+    $("status-text").textContent="台站数据加载失败:"+(e.message||"接口不可达");
+  }
+}
+load();setInterval(load,5000);
+</script>
+</body>
+</html>

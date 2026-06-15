@@ -82,6 +82,9 @@ def _test_config() -> AppConfig:
         backup=BackupSettings(
             dry_run_default=True,
             copy_empty_dirs=True,
+            retry_count=2,
+            retry_wait_seconds=5,
+            job_timeout_hours=6,
             smb_port=445,
             exclude_dirs=(),
             exclude_files=(),

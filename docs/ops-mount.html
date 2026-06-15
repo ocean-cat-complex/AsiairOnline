@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ASIAIR OPS · 赤道仪</title>
+<script src="ops-theme.js"></script>
+<style>
+html,body{height:100%;overflow:hidden}
+#sky{position:fixed;inset:0;width:100vw;height:100vh;cursor:grab;touch-action:none;z-index:0}
+#sky.dragging{cursor:grabbing}
+
+/* C 皮肤:工程图框 */
+.frame{display:none;position:fixed;inset:16px;border:1px solid var(--line);pointer-events:none;z-index:4}
+html[data-skin="C"] .frame{display:block}
+.frame::before,.frame::after{content:"";position:absolute;width:14px;height:14px;border-color:var(--text);border-style:solid}
+.frame::before{left:-1px;top:-1px;border-width:1px 0 0 1px}
+.frame::after{right:-1px;bottom:-1px;border-width:0 1px 1px 0}
+/* B 皮肤:暗角 */
+.vignette{display:none;position:fixed;inset:0;pointer-events:none;z-index:3;
+  background:radial-gradient(ellipse 75% 70% at 50% 46%, transparent 55%, rgba(6,9,17,.6) 100%)}
+html[data-skin="B"] .vignette{display:block}
+
+#cursor-tip{position:fixed;pointer-events:none;display:none;z-index:30;white-space:nowrap;
+  font:500 11px var(--mono);color:var(--ac);padding-left:14px;text-shadow:0 0 6px var(--bg)}
+html[data-skin="B"] #cursor-tip{font:italic 400 12.5px var(--body)}
+html[data-skin="C"] #cursor-tip{background:var(--scrim);padding:1px 6px 1px 14px;text-shadow:none;color:var(--text)}
+#cursor-tip::before{content:"";position:absolute;left:0;top:55%;width:9px;height:1px;background:var(--ac-soft)}
+html[data-skin="C"] #cursor-tip::before{left:4px;width:7px;background:var(--ac)}
+
+/* 主遥测带 */
+.kicker{display:none;text-align:center;font:300 10.5px var(--body);letter-spacing:.5em;color:var(--ac);text-transform:uppercase}
+html[data-skin="B"] .kicker{display:block}
+.telemetry{position:fixed;top:62px;left:50%;transform:translateX(-50%);z-index:20;text-align:center}
+.telemetry .row{display:flex;gap:44px;justify-content:center}
+.tele .tl{font:var(--lab-w) 10.5px var(--display);letter-spacing:.32em;color:var(--muted);text-transform:var(--lab-tt)}
+.tele .tv{margin-top:4px;font:700 30px/1.1 var(--mono);color:var(--ac);font-variant-numeric:tabular-nums;
+  white-space:nowrap;text-shadow:var(--glow)}
+html[data-skin="B"] .tele .tv{font:500 38px/1.1 var(--display);color:var(--text)}
+html[data-skin="C"] .tele .tv{font:500 26px/1.1 var(--mono);color:var(--text);text-shadow:none}
+.tele .ts{font:400 10px var(--mono);color:var(--quiet);margin-top:2px}
+
+/* 右栏注记 */
+.notes{position:fixed;right:0;top:150px;bottom:118px;z-index:20;width:286px;
+  padding:14px 24px 10px 20px;border-left:1px solid var(--ac-soft);overflow:auto;scrollbar-width:none;
+  background:linear-gradient(270deg,var(--scrim) 62%,var(--scrim0))}
+.notes::-webkit-scrollbar{display:none}
+html[data-skin="C"] .notes{border-left-color:var(--line)}
+.caps{display:flex;flex-wrap:wrap;gap:6px;padding-top:4px}
+.cap{font:var(--lab-w) 10.5px var(--display);letter-spacing:.1em;padding:2px 10px;
+  border:1px solid var(--line);border-radius:var(--pill);color:var(--muted);text-transform:var(--lab-tt)}
+
+/* 底部控制与状态 */
+.bottom{position:fixed;left:0;right:0;bottom:0;z-index:20;padding:0 24px 12px;
+  background:linear-gradient(0deg,var(--scrim) 65%,var(--scrim0))}
+.controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-bottom:9px}
+html[data-skin="B"] .controls{justify-content:center}
+.csep{width:1px;height:16px;background:var(--line);margin:0 4px}
+html[data-skin="B"] .csep{display:none}
+
+.notice{position:fixed;left:50%;top:46%;transform:translate(-50%,-50%);z-index:25;display:none;
+  padding:13px 24px;border:1px solid var(--ac-soft);color:var(--ac);background:var(--scrim);
+  font:var(--lab-w) 14px var(--display);letter-spacing:.12em;text-transform:var(--lab-tt)}
+.notice.show{display:block}
+.demo-flag{position:fixed;left:24px;top:150px;z-index:20;display:none;
+  font:var(--lab-w) 10px var(--display);letter-spacing:.24em;color:var(--bg);background:var(--warn);
+  padding:3px 9px;text-transform:var(--lab-tt)}
+.demo-flag.show{display:block}
+.phys-note{position:fixed;left:24px;bottom:118px;z-index:20;max-width:330px;
+  font:italic 300 12px var(--body);color:var(--muted);
+  background:linear-gradient(90deg,var(--scrim) 60%,var(--scrim0));padding:6px 18px 6px 0}
+html[data-skin="A"] .phys-note,html[data-skin="C"] .phys-note{font-style:normal;font-size:11.5px}
+
+@media (max-width:980px){
+  html,body{overflow:auto}
+  .telemetry{position:static;transform:none;margin:74px 12px 0}
+  .telemetry .row{gap:18px;flex-wrap:wrap}
+  .tele .tv{font-size:20px}
+  .notes{position:static;width:auto;margin:14px 18px;background:none;border-left:0;border-top:1px solid var(--ac-soft);max-height:none}
+  .bottom{position:static}
+  .phys-note{position:static;max-width:none;margin:0 18px}
+  #sky{position:fixed}
+}
+</style>
+</head>
+<body>
+<canvas id="sky"></canvas>
+<div class="vignette"></div><div class="frame"></div>
+<div id="cursor-tip"></div>
+<span class="demo-flag" id="demo-flag">演示遥测 DEMO</span>
+<div id="notice" class="notice">赤道仪未连接 —— 连接后自动恢复实时遥测</div>
+
+<div class="telemetry seq">
+  <div class="kicker">Plate · Equatorial Mount</div>
+  <div class="row">
+    <div class="tele"><div class="tl">赤经 · RA</div><div class="tv" id="ra">--</div><div class="ts">J2000</div></div>
+    <div class="tele"><div class="tl">赤纬 · DEC</div><div class="tv" id="dec">--</div><div class="ts">J2000</div></div>
+    <div class="tele"><div class="tl">本地恒星时 · LST</div><div class="tv" id="lst">--</div><div class="ts" id="pos-hint"></div></div>
+  </div>
+</div>
+
+<aside class="notes seq d1">
+  <div class="hgroup"><h3><span class="rn">Ⅰ</span>跟踪与运动</h3>
+    <div class="hrow" data-hi="scope"><span class="k">跟踪 Tracking</span><span class="v"><span id="tracking" class="lampline"><i></i><span>--</span></span></span></div>
+    <div class="hrow"><span class="k">运动 Motion</span><span class="v"><span id="moving" class="lampline"><i></i><span>--</span></span></span></div>
+    <div class="hrow"><span class="k">中天侧 Pier</span><span class="v ac" id="pierside">--</span></div>
+  </div>
+  <div class="hgroup"><h3><span class="rn">Ⅱ</span>目标 Goto <span id="goto-hint" style="color:var(--ac);letter-spacing:0;text-transform:none"></span></h3>
+    <div class="hrow" data-hi="target"><span class="k">目标</span><span class="v ac" id="t-name">--</span></div>
+    <div class="hrow" data-hi="target"><span class="k">目标 RA</span><span class="v" id="t-ra">--</span></div>
+    <div class="hrow" data-hi="target"><span class="k">目标 DEC</span><span class="v" id="t-dec">--</span></div>
+    <div class="hrow"><span class="k">角度</span><span class="v" id="t-angle">--</span></div>
+  </div>
+  <div class="hgroup"><h3><span class="rn">Ⅲ</span>站点</h3>
+    <div class="hrow"><span class="k">纬度</span><span class="v" id="lat">--</span></div>
+    <div class="hrow"><span class="k">经度</span><span class="v" id="lng">--</span></div>
+  </div>
+  <div class="hgroup"><h3><span class="rn">Ⅳ</span>能力</h3><div class="caps" id="caps"></div></div>
+</aside>
+
+<div class="phys-note seq d2" id="phys-note"></div>
+
+<div class="bottom seq d2">
+  <div class="controls">
+    <button id="refresh-btn" class="con" type="button">刷新</button>
+    <span class="csep"></span>
+    <button id="tg-eq"  class="con on" type="button" aria-pressed="true">赤道网格</button>
+    <button id="tg-alt" class="con"    type="button" aria-pressed="false">地平网格</button>
+    <button id="tg-gnd" class="con on" type="button" aria-pressed="true">地面</button>
+    <span class="csep"></span>
+    <span class="con-note">时间流速(仅此图)</span>
+    <button id="speed-1"    class="con on" type="button">×1</button>
+    <button id="speed-600"  class="con" type="button">×600</button>
+    <button id="speed-3600" class="con" type="button">×3600</button>
+    <span class="csep"></span>
+    <button id="demo-slew" class="con" type="button" style="display:none">演示转向 → M45</button>
+    <button id="raw-toggle" class="con" type="button">RAW</button>
+    <span class="con-note" style="margin-left:auto">拖拽转视角 · 滚轮缩放 · 悬停读坐标 · 只读</span>
+  </div>
+  <div class="statusline">
+    <span class="kind" id="status-kind" style="color:var(--good)">[—]</span>
+    <span class="msg" id="status-text">等待赤道仪数据</span>
+    <span class="ts" id="snapshot">--</span>
+  </div>
+</div>
+
+<div class="drawer" id="raw-drawer">
+  <div class="drawer-head"><b>原始数据 RAW · 只读</b><button class="con" id="raw-close" type="button">关闭</button></div>
+  <pre id="raw">--</pre>
+</div>
+
+<script>
+/* ════════ 引擎:真实遥测优先,断连回退演示;三皮肤共用 ════════ */
+const $=id=>document.getElementById(id);
+const OPS=window.OPS;
+const REDUCED=matchMedia("(prefers-reduced-motion: reduce)").matches;
+const cssv=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const SKINS={
+  A:{label:"600 11px 'Barlow Condensed',sans-serif",small:"600 10px 'Barlow Condensed',sans-serif",
+     cardinal:[["N",0],["E",90],["S",180],["W",270]],scope:"SCOPE"},
+  B:{label:"italic 400 12px 'Spectral',serif",small:"italic 300 11px 'Spectral',serif",
+     cardinal:[["北",0],["东",90],["南",180],["西",270]],scope:"镜指向"},
+  C:{label:"500 11px 'IBM Plex Sans','Noto Sans SC',sans-serif",small:"400 10px 'IBM Plex Sans',sans-serif",
+     cardinal:[["N",0],["E",90],["S",180],["W",270]],scope:"指向"},
+};
+const sk=()=>SKINS[document.documentElement.dataset.skin]||SKINS.B;
+
+let MODE="boot";              // live | demo
+let skyEq=1,skyAlt=0,skyGnd=1,gEq=0,gAlt=0,gGnd=0;
+let vAz=160,vEl=26,vFov=58;
+let timeScale=1,simMs=Date.now();
+let aimed=false,userMoved=false;
+let reveal=REDUCED?1:0,HI=null,meteors=[];
+let model=null;               // 渲染模型(由真实或演示遥测构建)
+let slew=null,targetIdx=0;
+
+const pad=n=>String(n).padStart(2,"0");
+const RAD=Math.PI/180;
+function lstHours(date,lng){const jd=date.getTime()/86400000+2440587.5,d=jd-2451545.0;
+  let g=280.46061837+360.98564736629*d;g=((g%360)+360)%360;
+  let l=g+lng;l=((l%360)+360)%360;return l/15;}
+function eqToAltAz(raH,decD,lstH,latD){
+  const H=(lstH-raH)*15*RAD,dec=decD*RAD,lat=latD*RAD;
+  const sA=Math.sin(dec)*Math.sin(lat)+Math.cos(dec)*Math.cos(lat)*Math.cos(H);
+  const alt=Math.asin(Math.max(-1,Math.min(1,sA)));
+  const y=-Math.sin(H)*Math.cos(dec);
+  const x=Math.sin(dec)*Math.cos(lat)-Math.cos(dec)*Math.sin(lat)*Math.cos(H);
+  let az=Math.atan2(y,x);if(az<0)az+=2*Math.PI;
+  return{az:az/RAD,alt:alt/RAD};}
+function altAzToEq(azD,altD,lstH,latD){
+  const az=azD*RAD,alt=altD*RAD,lat=latD*RAD;
+  const sD=Math.sin(lat)*Math.sin(alt)+Math.cos(lat)*Math.cos(alt)*Math.cos(az);
+  const dec=Math.asin(Math.max(-1,Math.min(1,sD)));
+  const H=Math.atan2(-Math.sin(az)*Math.cos(alt),Math.sin(alt)*Math.cos(lat)-Math.cos(alt)*Math.sin(lat)*Math.cos(az));
+  let ra=lstH-H/(15*RAD);ra=((ra%24)+24)%24;
+  return{ra,dec:dec/RAD};}
+const fmtHMS=h=>{h=((h%24)+24)%24;const H=Math.floor(h),M=Math.floor((h-H)*60),S=Math.floor(((h-H)*60-M)*60);
+  return `${pad(H)}ʰ ${pad(M)}ᵐ ${pad(S)}ˢ`;};
+const fmtDMS=d=>{const s=d<0?"−":"+";d=Math.abs(d);const D=Math.floor(d),M=Math.floor((d-D)*60),S=Math.floor(((d-D)*60-M)*60);
+  return `${s}${pad(D)}°${pad(M)}′${pad(S)}″`;};
+const easeIO=t=>t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2;
+function hexA(hex,a){const h=hex.replace("#","");
+  const n=parseInt(h.length===3?h.split("").map(c=>c+c).join(""):h,16);
+  return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`;}
+
+/* ── 模型构建:跟踪→锁赤道坐标;未跟踪→锁地平坐标 ── */
+function buildModel(d,demo){
+  const p=d.position||{},s=d.site||{},t=d.target||{};
+  const lst0=p.lst_hours!=null?p.lst_hours:lstHours(new Date(),s.lng||0);
+  const m={demo:!!demo,raw:d,connected:!!d.connected,ok:d.ok!==false,
+    lat:s.lat??40,lng:s.lng??116,
+    tracking:d.tracking===true,slewing:!!(t.slewing),
+    scopeEq:{ra:p.ra_hours,dec:p.dec_degrees},
+    target:(t.ra_hours!=null)?{name:t.name,ra:t.ra_hours,dec:t.dec_degrees,ra_text:t.ra_text,dec_text:t.dec_text,angle:t.angle}:null,
+  };
+  m.scopeAA=(p.ra_hours!=null)?eqToAltAz(p.ra_hours,p.dec_degrees,lst0,m.lat):null;
+  return m;
+}
+function lstNow(){return model?lstHours(new Date(simMs),model.lng):0;}
+function scopeNow(){
+  if(!model||model.scopeEq.ra==null)return null;
+  if(slew){ /* 演示转向:在赤道坐标间插值 */
+    const p=Math.min(1,(Date.now()-slew.t0)/slew.dur);
+    if(p>=1){slew=null;}
+    else{const e=easeIO(p),dh=((slew.to.ra-slew.from.ra+12)%24)-12;
+      return{eq:{ra:((slew.from.ra+dh*e)%24+24)%24,dec:slew.from.dec+(slew.to.dec-slew.from.dec)*e},slewing:true};}
+  }
+  if(model.tracking)return{eq:model.scopeEq,slewing:false};
+  /* 未跟踪:地平坐标恒定,反推当前赤道坐标 */
+  const eq=altAzToEq(model.scopeAA.az,model.scopeAA.alt,lstNow(),model.lat);
+  return{eq,slewing:false,parked:true};
+}
+
+/* ── DOM 渲染 ── */
+function setLamp(id,text,state){const el=$(id);
+  el.className="lampline"+(state==="on"?" on":state==="warn"?" warn":"");
+  el.lastElementChild.textContent=text;}
+function setText(id,v){const el=$(id);if(!el)return;
+  const s=(v==null||v==="")?"--":v;if(el.textContent!==s)el.textContent=s;}
+let capsSig="";
+function renderStatic(d,demo){
+  $("notice").classList.toggle("show",d.ok!==false&&!d.connected);
+  $("demo-flag").classList.toggle("show",!!demo);
+  $("demo-slew").style.display=demo?"":"none";
+  setLamp("tracking",d.tracking===true?"开启":d.tracking===false?"关闭":"--",d.tracking===true?"on":"");
+  setLamp("moving",d.moving_text||"--",d.is_moving?"warn":"");
+  setText("pierside",d.pier_side_text);
+  const t=d.target||{};
+  setText("t-name",t.name);setText("t-ra",t.ra_text);setText("t-dec",t.dec_text);
+  setText("t-angle",t.angle!=null?(+t.angle).toFixed(2)+"°":null);
+  $("goto-hint").textContent=t.slewing?"· 转向中…":"";
+  const s=d.site||{};
+  setText("lat",s.lat_text);setText("lng",s.lng_text);
+  const sig=(d.capabilities||[]).join("|");
+  if(sig!==capsSig){capsSig=sig;const c=$("caps");c.innerHTML="";
+    (d.capabilities||[]).forEach(x=>{const e=document.createElement("span");e.className="cap";e.textContent=x;c.appendChild(e);});}
+  $("raw").textContent=JSON.stringify(d.raw||{},null,2);
+  const kind=d.ok===false?"ERR":d.connected?"OK":"WARN";
+  $("status-kind").textContent=`[${kind}]`;
+  $("status-kind").style.color=d.ok===false?"var(--bad)":d.connected?"var(--good)":"var(--warn)";
+  $("status-text").textContent=d.ok===false?(d.error||"查询失败")
+    :d.connected?`赤道仪在线 · ${(d.device&&d.device.name)||""}${demo?" · 演示遥测":""}${timeScale>1?` · 预览时间×${timeScale}`:""}`
+    :"赤道仪未连接";
+  $("snapshot").textContent=d.snapshot_at||"--";
+  $("phys-note").textContent=
+    d.tracking===true?"跟踪开启:镜指向锁定赤道坐标,随天球同步转动。"
+    :d.connected?"未跟踪(停泊):镜指向固定在地平坐标 —— 调高时间流速,可见星空在镜后转动。":"";
+}
+function renderTick(){ /* 每帧:坐标读数随模型推进 */
+  const sc=scopeNow();if(!sc){setText("ra",null);setText("dec",null);setText("lst",null);return;}
+  setText("ra",fmtHMS(sc.eq.ra));
+  setText("dec",fmtDMS(sc.eq.dec));
+  setText("lst",fmtHMS(lstNow()));
+  $("pos-hint").textContent=`RA ${sc.eq.ra.toFixed(3)}h · Dec ${sc.eq.dec.toFixed(3)}°`;
+  if(slew){setLamp("moving","转向中","warn");$("goto-hint").textContent="· 转向中…";}
+}
+
+/* ── 演示遥测(API 不可达) ── */
+const DEMO_SITE={lat:38.61,lng:99.13,lat_text:"N 38°36′36″",lng_text:"E 99°07′48″"};
+const TGT=[{name:"M31 仙女座星系",ra:.7123,dec:41.269},{name:"M45 昴星团",ra:3.791,dec:24.117}];
+function demoData(){
+  const now=new Date(simMs),lst=lstHours(now,DEMO_SITE.lng),t=TGT[targetIdx];
+  return{ok:true,connected:true,tracking:true,is_moving:!!slew,moving_text:slew?"转向中":"静止",
+    pier_side_text:"西侧 West",device:{name:"演示 · EQ8-R Pro"},
+    position:{ra_hours:t.ra,dec_degrees:t.dec,lst_hours:lst},
+    site:DEMO_SITE,
+    target:{name:t.name,ra_hours:t.ra,dec_degrees:t.dec,ra_text:fmtHMS(t.ra),dec_text:fmtDMS(t.dec),angle:0,slewing:!!slew},
+    capabilities:["goto","tracking","park","home","guide","sync"],
+    raw:{Note:"DEMO TELEMETRY — 后端不可达",Target:t.name,TimeScale:timeScale},
+    snapshot_at:now.toLocaleString("zh-CN",{hour12:false})};
+}
+
+/* ── 天球绘制 ── */
+const cv=$("sky"),ctx=cv.getContext("2d");
+const STARS=(()=>{let s=20260612;const rnd=()=>{s^=s<<13;s^=s>>>17;s^=s<<5;return((s>>>0)/4294967296);};
+  return Array.from({length:380},()=>({ra:rnd()*24,dec:Math.asin(2*rnd()-1)/RAD,m:rnd(),ph:rnd()*6.28,sp:.5+rnd()*1.5}));})();
+function project(az,alt,scale,cx,cy){
+  const a=az*RAD,e=alt*RAD,a0=vAz*RAD,e0=vEl*RAD;
+  const c=Math.sin(e0)*Math.sin(e)+Math.cos(e0)*Math.cos(e)*Math.cos(a-a0);
+  if(c<-.25)return null;
+  const k=2/(1+c);
+  return{x:cx+k*Math.cos(e)*Math.sin(a-a0)*scale,
+         y:cy-k*(Math.cos(e0)*Math.sin(e)-Math.sin(e0)*Math.cos(e)*Math.cos(a-a0))*scale};}
+function invProject(px,py,scale,cx,cy){
+  const X=(px-cx)/scale,Y=-(py-cy)/scale,rho=Math.hypot(X,Y);
+  if(rho<1e-9)return{az:vAz,alt:vEl};
+  const c=2*Math.atan(rho/2),e0=vEl*RAD;
+  const alt=Math.asin(Math.cos(c)*Math.sin(e0)+Y*Math.sin(c)*Math.cos(e0)/rho);
+  const az=vAz*RAD+Math.atan2(X*Math.sin(c),rho*Math.cos(e0)*Math.cos(c)-Y*Math.sin(e0)*Math.sin(c));
+  return{az:((az/RAD)%360+360)%360,alt:alt/RAD};}
+function strokePath(pts,style,w,dash){
+  ctx.strokeStyle=style;ctx.lineWidth=w;ctx.setLineDash(dash||[]);
+  let open=false;
+  for(const p of pts){
+    if(!p){if(open){ctx.stroke();open=false;}continue;}
+    if(!open){ctx.beginPath();ctx.moveTo(p.x,p.y);open=true;}else ctx.lineTo(p.x,p.y);
+  }
+  if(open)ctx.stroke();ctx.setLineDash([]);}
+function drawSky(now,dt){
+  const w=cv.clientWidth,h=cv.clientHeight,dpr=devicePixelRatio||1;
+  if(cv.width!==w*dpr||cv.height!==h*dpr){cv.width=w*dpr;cv.height=h*dpr;}
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.fillStyle=cssv("--sky-bg");ctx.fillRect(0,0,w,h);
+  if(!model)return;
+  const lst=lstNow(),lat=model.lat;
+  const cx=w/2,cy=h/2,scale=Math.min(w,h)/(vFov*RAD);
+  const P=(az,alt)=>project(az,alt,scale,cx,cy);
+  const rv=reveal,ts=now/1000;
+
+  if(gAlt>.01){ctx.globalAlpha=gAlt*rv;
+    for(let a=0;a<=80;a+=20){const pts=[];for(let z=0;z<=360;z+=3)pts.push(P(z,a));strokePath(pts,cssv("--sky-grid-alt"),1);}
+    for(let z=0;z<360;z+=30){const pts=[];for(let a=0;a<=88;a+=3)pts.push(P(z,a));strokePath(pts,cssv("--sky-grid-alt"),1);}
+    ctx.globalAlpha=1;}
+  if(gEq>.01){ctx.globalAlpha=gEq*rv;
+    for(let dec=-60;dec<=80;dec+=20){const pts=[];
+      for(let raH=0;raH<=24.01;raH+=.2){const aa=eqToAltAz(raH,dec,lst,lat);pts.push(skyGnd&&aa.alt<-1?null:P(aa.az,aa.alt));}
+      strokePath(pts,cssv("--sky-grid-eq"),dec===0?1.6:1,dec===0?[]:[4,5]);}
+    for(let raH=0;raH<24;raH+=2){const pts=[];
+      for(let dec=-85;dec<=85;dec+=2){const aa=eqToAltAz(raH,dec,lst,lat);pts.push(skyGnd&&aa.alt<-1?null:P(aa.az,aa.alt));}
+      strokePath(pts,cssv("--sky-grid-eq"),1,[4,5]);}
+    ctx.globalAlpha=1;}
+
+  ctx.fillStyle=cssv("--sky-star");
+  for(const st of STARS){
+    const aa=eqToAltAz(st.ra,st.dec,lst,lat);
+    if(skyGnd&&gGnd>.5&&aa.alt<0)continue;
+    const p=P(aa.az,aa.alt);if(!p||p.x<-20||p.x>w+20||p.y<-20||p.y>h+20)continue;
+    const tw=REDUCED?1:(.72+.28*Math.sin(ts*st.sp+st.ph));
+    ctx.globalAlpha=(.3+st.m*.62)*tw*rv;
+    ctx.beginPath();ctx.arc(p.x,p.y,st.m>.96?2:st.m>.8?1.4:.8,0,7);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+
+  if(!REDUCED){
+    if(Math.random()<dt/9)meteors.push({az:Math.random()*360,alt:25+Math.random()*50,
+      dAz:(Math.random()*2-1)*60,dAlt:-(20+Math.random()*30),life:0,max:.7+Math.random()*.4});
+    meteors=meteors.filter(m=>m.life<m.max);
+    const col=cssv("--sky-star");
+    for(const m of meteors){
+      m.life+=dt;const f=m.life/m.max;
+      const az=m.az+m.dAz*m.life,alt=m.alt+m.dAlt*m.life;
+      const p1=P(az,alt),p2=P(az-m.dAz*.12,alt-m.dAlt*.12);
+      if(p1&&p2&&alt>2){
+        const g=ctx.createLinearGradient(p2.x,p2.y,p1.x,p1.y);
+        g.addColorStop(0,hexA(col,0));g.addColorStop(1,hexA(col,.8*(1-f)*rv));
+        ctx.strokeStyle=g;ctx.lineWidth=1.4;
+        ctx.beginPath();ctx.moveTo(p2.x,p2.y);ctx.lineTo(p1.x,p1.y);ctx.stroke();
+      }
+    }
+  }
+
+  if(skyGnd&&gGnd>.01){
+    ctx.globalAlpha=gGnd*rv;
+    const pts=[];for(let z=0;z<=360;z+=2)pts.push(P(z,0));
+    strokePath(pts,cssv("--sky-horizon"),1.3);
+    const g=ctx.createLinearGradient(0,h*.6,0,h);
+    g.addColorStop(0,"rgba(0,0,0,0)");g.addColorStop(1,cssv("--sky-ground"));
+    ctx.fillStyle=g;ctx.fillRect(0,h*.6,w,h*.4);
+    ctx.fillStyle=cssv("--sky-horizon");ctx.font=sk().small;
+    sk().cardinal.forEach(([t,az])=>{const p=P(az,1.5);if(p)ctx.fillText(t,p.x-4,p.y-6);});
+    ctx.globalAlpha=1;
+  }
+
+  const sc=scopeNow();
+  if(sc){
+    const aa=eqToAltAz(sc.eq.ra,sc.eq.dec,lst,lat);
+    const ps=P(aa.az,aa.alt);
+    if(ps){
+      const pulse=(HI==="scope")?(1+.25*Math.sin(ts*5)):1;
+      ctx.globalAlpha=rv;
+      ctx.strokeStyle=cssv("--sky-scope");ctx.lineWidth=1.4;
+      ctx.beginPath();ctx.arc(ps.x,ps.y,14*pulse,0,7);ctx.stroke();
+      ctx.beginPath();
+      [[-22,0,-8,0],[8,0,22,0],[0,-22,0,-8],[0,8,0,22]].forEach(([a,b,c,d])=>{
+        ctx.moveTo(ps.x+a*pulse,ps.y+b*pulse);ctx.lineTo(ps.x+c*pulse,ps.y+d*pulse);});
+      ctx.stroke();
+      ctx.fillStyle=cssv("--sky-scope");ctx.font=sk().label;
+      ctx.fillText(sk().scope+(sc.parked?" · 停泊":""),ps.x+18,ps.y-14);
+      ctx.globalAlpha=1;
+    }
+  }
+  if(model.target){
+    const aa=eqToAltAz(model.target.ra,model.target.dec,lst,lat);
+    const pt=P(aa.az,aa.alt);
+    if(pt){
+      const pulse=(HI==="target")?(1+.3*Math.sin(ts*5)):1;
+      ctx.globalAlpha=rv;
+      ctx.strokeStyle=cssv("--sky-target");ctx.lineWidth=1.2;
+      ctx.strokeRect(pt.x-7*pulse,pt.y-7*pulse,14*pulse,14*pulse);
+      ctx.fillStyle=cssv("--sky-target");ctx.font=sk().label;
+      ctx.fillText(model.target.name||"目标",pt.x+12,pt.y+4);
+      ctx.globalAlpha=1;
+    }
+  }
+}
+
+/* ── 主循环 ── */
+let lastT=performance.now(),lastDom=0;
+function loop(now){
+  const dt=Math.min(.1,(now-lastT)/1000);lastT=now;
+  simMs+=dt*1000*timeScale;
+  if(reveal<1)reveal=Math.min(1,reveal+dt/1.4);
+  const ease=(c,t)=>c+(t-c)*Math.min(1,dt*5);
+  gEq=ease(gEq,skyEq);gAlt=ease(gAlt,skyAlt);gGnd=ease(gGnd,skyGnd);
+  drawSky(now,dt);
+  if(now-lastDom>200){lastDom=now;renderTick();
+    if(MODE==="demo")renderStatic(demoData(),true);}
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+/* ── 交互 ── */
+const tip=$("cursor-tip");
+(function pointer(){
+  let drag=null;
+  cv.addEventListener("pointerdown",e=>{userMoved=true;drag={x:e.clientX,y:e.clientY,az:vAz,el:vEl};
+    cv.classList.add("dragging");cv.setPointerCapture(e.pointerId);tip.style.display="none";e.preventDefault();});
+  cv.addEventListener("pointermove",e=>{
+    if(drag){
+      vAz=drag.az-(e.clientX-drag.x)*.25;
+      vEl=Math.max(-5,Math.min(85,drag.el+(e.clientY-drag.y)*.2));
+      vAz=((vAz%360)+360)%360;return;
+    }
+    if(!model)return;
+    const scale=Math.min(cv.clientWidth,cv.clientHeight)/(vFov*RAD);
+    const aa=invProject(e.clientX,e.clientY,scale,cv.clientWidth/2,cv.clientHeight/2);
+    if(aa.alt<-2){tip.style.display="none";return;}
+    const eq=altAzToEq(aa.az,aa.alt,lstNow(),model.lat);
+    tip.textContent=`RA ${fmtHMS(eq.ra)} · Dec ${fmtDMS(eq.dec)}`;
+    tip.style.left=(e.clientX+14)+"px";tip.style.top=(e.clientY-8)+"px";tip.style.display="block";
+  });
+  cv.addEventListener("pointerleave",()=>tip.style.display="none");
+  cv.addEventListener("pointerup",()=>{drag=null;cv.classList.remove("dragging");});
+  cv.addEventListener("wheel",e=>{userMoved=true;e.preventDefault();
+    vFov=Math.max(14,Math.min(90,vFov+(e.deltaY>0?4:-4)));},{passive:false});
+})();
+[["tg-eq",v=>skyEq=v,()=>skyEq],["tg-alt",v=>skyAlt=v,()=>skyAlt],["tg-gnd",v=>skyGnd=v,()=>skyGnd]]
+.forEach(([id,set,get])=>$(id).addEventListener("click",()=>{
+  set(get()?0:1);$(id).classList.toggle("on",!!get());$(id).setAttribute("aria-pressed",!!get());}));
+[["speed-1",1],["speed-600",600],["speed-3600",3600]].forEach(([id,v])=>
+  $(id).addEventListener("click",()=>{
+    if(v===1)simMs=Date.now();           /* 回到实时 */
+    timeScale=v;
+    ["speed-1","speed-600","speed-3600"].forEach(i=>$(i).classList.toggle("on",i===id));}));
+$("demo-slew").addEventListener("click",()=>{
+  if(MODE!=="demo"||slew)return;
+  const from=TGT[targetIdx];targetIdx=1-targetIdx;const to=TGT[targetIdx];
+  slew={t0:Date.now(),dur:4500,from:{ra:from.ra,dec:from.dec},to:{ra:to.ra,dec:to.dec}};
+  $("demo-slew").textContent=`演示转向 → ${TGT[1-targetIdx].name.split(" ")[0]}`;});
+$("raw-toggle").addEventListener("click",()=>$("raw-drawer").classList.toggle("open"));
+$("raw-close").addEventListener("click",()=>$("raw-drawer").classList.remove("open"));
+document.querySelectorAll("[data-hi]").forEach(el=>{
+  el.addEventListener("mouseenter",()=>HI=el.dataset.hi);
+  el.addEventListener("mouseleave",()=>HI=null);});
+
+/* ── 轮询 ── */
+async function poll(){
+  try{
+    /* 接入修订:后端 mount-state 串行 RPC 上限约 2.5s×N,1800ms 会被正常抖动击穿 */
+    const d=await OPS.fetchJSON("/api/mount-state"+(OPS.device?`?device=${encodeURIComponent(OPS.device)}`:""),{timeout:6000});
+    MODE="live";
+    if(timeScale===1)simMs=Date.now();   /* 实时模式持续校准 */
+    model=buildModel(d,false);
+    if(!aimed&&!userMoved&&model.scopeAA){aimed=true;
+      vAz=model.scopeAA.az;vEl=Math.max(8,Math.min(65,model.scopeAA.alt));}
+    renderStatic(d,false);
+  }catch(e){
+    /* 设计特性(用户确认):后端断连时回退演示遥测并亮 DEMO 角标;
+       超时已从 1800ms 放宽到 6000ms,只有持续断连才会进入演示模式 */
+    if(MODE!=="demo"){MODE="demo";simMs=Date.now();}
+    model=buildModel(demoData(),true);
+    if(!aimed&&!userMoved&&model.scopeAA){aimed=true;
+      vAz=model.scopeAA.az;vEl=Math.max(8,Math.min(65,model.scopeAA.alt));}
+  }
+}
+$("refresh-btn").addEventListener("click",poll);
+poll();setInterval(()=>{if(!OPS.hidden())poll();},2000);
+</script>
+</body>
+</html>

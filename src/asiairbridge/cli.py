@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
+import shutil
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from .backup import build_jobs, result_to_dict, run_job
+from .backup import BackupResult, build_jobs, result_to_dict, run_job
 from .config import ConfigError, load_config
 from .monitor import dashboard_snapshot, scan_source_totals
 from .probe import copy_backend_available, net_view, path_exists, ping_host, tcp_open
@@ -294,6 +296,7 @@ def _cmd_backup(config, args: argparse.Namespace) -> int:  # type: ignore[no-unt
         dry_run = False
 
     run_id = datetime.now().strftime("%Y%m%d-%H%M%S")
+    _prune_old_logs(config)
     jobs = build_jobs(config, run_id, args.device, args.source_label)
     if not jobs:
         print("No enabled backup jobs matched the request.", file=sys.stderr)
@@ -311,7 +314,20 @@ def _cmd_backup(config, args: argparse.Namespace) -> int:  # type: ignore[no-unt
         for job in jobs:
             mode = "DRY-RUN" if dry_run else "RUN"
             print(f"{mode} {job.device.name}: {job.source_path} -> {job.destination_path}")
-            result = run_job(config, job, dry_run=dry_run)
+            try:
+                result = run_job(config, job, dry_run=dry_run)
+            except Exception as exc:  # noqa: BLE001
+                now = datetime.now().isoformat(timespec="seconds")
+                result = BackupResult(
+                    job=job,
+                    ok=False,
+                    status="failed",
+                    exit_code=None,
+                    detail=f"{type(exc).__name__}: {exc}",
+                    started_at=now,
+                    finished_at=now,
+                    copy_backend="none",
+                )
             results.append(result_to_dict(result))
             print(f"  {result.status}: {result.detail}")
 
@@ -334,6 +350,16 @@ def _cmd_backup(config, args: argparse.Namespace) -> int:  # type: ignore[no-unt
         print(f"Recorded state: {state_path}")
         print(f"Summary: {ok_count}/{len(results)} jobs ok")
     return 0 if payload["ok"] else 8
+
+
+def _prune_old_logs(config, keep_days: int = 90) -> None:  # type: ignore[no-untyped-def]
+    logs_dir = config.logs_path()
+    if not logs_dir.exists():
+        return
+    cutoff = (datetime.now() - timedelta(days=keep_days)).strftime("%Y-%m-%d")
+    for child in logs_dir.iterdir():
+        if child.is_dir() and re.fullmatch(r"\d{4}-\d{2}-\d{2}", child.name) and child.name < cutoff:
+            shutil.rmtree(child, ignore_errors=True)
 
 
 def _cmd_status(config, args: argparse.Namespace) -> int:  # type: ignore[no-untyped-def]
