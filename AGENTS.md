@@ -5,7 +5,7 @@ This repository is the ASIAIR sidecar for the remote observatory website. Read t
 ## Scope
 
 - Current branch target: `asiair_online_macos`.
-- Runtime role: independent sidecar service for ASIAIR monitoring, current image preview, read-only mount status, guarded camera controls, local material indexing, and incremental backup.
+- Runtime role: independent sidecar service for ASIAIR monitoring, current image preview/cache, read-only mount status, guarded camera controls, local material indexing, and incremental backup.
 - Python: `>=3.12`; on this Mac prefer `/opt/homebrew/bin/python3.13`.
 - Host assumptions: macOS with Tailscale or private LAN access to ASIAIR devices.
 
@@ -35,6 +35,7 @@ Runtime/private files are ignored by git:
 
 ```text
 config/devices.json
+devices.json
 logs/
 state/
 .venv/
@@ -60,6 +61,10 @@ RUN_BACKUP=1 PYTHON=/opt/homebrew/bin/python3.13 ./scripts/backup-all.sh
 
 Main local pages on port `8787`: `/` or `/monitor-minterm`, `/camera`, `/mount`, and `/materials`.
 Core read-only APIs: `/api/status`, `/api/devices`, `/api/rpc-monitor`, `/api/mount-state`, `/api/current-image`, and `/api/current-image-file`.
+
+Live current-image acquisition belongs in this sidecar. `/api/current-image` should read ASIAIR's `get_current_img` preview stream directly from the device, trying port `4800` first and port `4801` second. The packet is an ASIAIR header plus ZIP-compressed `raw_data` containing 8/16-bit mono preview pixels; the sidecar decompresses it, stretches it, and writes only the temporary preview cache under `state/image-preview/`. Do not make live current-image display depend on macOS `/Volumes` mounts, ASIAIR storage scans, the backup destination, or the material-library SQLite index. Downstream display apps such as the 5010 standalone monitor should consume `/api/current-image` and `/api/current-image-file` without adding their own ASIAIR image fallback.
+
+The material-library SQLite index is lazy and should only initialize when `/materials` or `/api/materials/*` is used. Monitoring/status/current-image paths must not create or require that database.
 
 ## Safety
 

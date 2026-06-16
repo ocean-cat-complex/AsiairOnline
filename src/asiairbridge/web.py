@@ -62,12 +62,17 @@ class AsiairBridgeServer(ThreadingHTTPServer):
         self.camera_operations_lock = threading.Lock()
         self.camera_cache = CameraStateCache(config)
         self.camera_cache.start()
-        self.materials = MaterialLibrary(config)
+        self._materials: MaterialLibrary | None = None
         init_rpc_monitor_state(self)
 
     def server_close(self) -> None:
         self.camera_cache.stop()
         super().server_close()
+
+    def materials(self) -> MaterialLibrary:
+        if self._materials is None:
+            self._materials = MaterialLibrary(self.config)
+        return self._materials
 
 
 def devices_payload(config: AppConfig) -> dict[str, Any]:
@@ -95,6 +100,88 @@ def devices_payload(config: AppConfig) -> dict[str, Any]:
         "default_device": default_device.name,
         "devices": devices,
     }
+
+
+def _current_image_capture_context(server: Any, device_name: str | None) -> dict[str, Any]:
+    configured_camera = _configured_camera_context(server.config, device_name)
+    try:
+        snapshot = rpc_monitor_response(server, device_name=device_name, force=False)
+    except Exception as exc:  # noqa: BLE001
+        return {"enabled": False, "error": str(exc), **configured_camera}
+    highlights = snapshot.get("highlights")
+    if not isinstance(highlights, dict):
+        highlights = {}
+    page = str(highlights.get("page") or "").strip()
+    enabled = _is_capture_context_page(page)
+    camera_info = _rpc_result_for_method(snapshot, "get_camera_info")
+    device_state = _rpc_result_for_method(snapshot, "get_device_state")
+    device_camera = device_state.get("camera") if isinstance(device_state, dict) else None
+    debayer_pattern = None
+    camera_is_color = None
+    if isinstance(camera_info, dict):
+        camera_is_color = camera_info.get("is_color")
+        debayer_pattern = camera_info.get("debayer_pattern")
+    if debayer_pattern is None and isinstance(device_camera, dict):
+        debayer_pattern = device_camera.get("debayer_pattern")
+    if camera_is_color is None:
+        camera_is_color = configured_camera.get("camera_is_color")
+    if debayer_pattern is None:
+        debayer_pattern = configured_camera.get("debayer_pattern")
+    if camera_is_color is None and debayer_pattern:
+        camera_is_color = True
+    return {
+        "enabled": enabled,
+        "page": page or None,
+        "capture_state": highlights.get("capture_state"),
+        "capture_working": highlights.get("capture_working"),
+        "target_name": highlights.get("target_name"),
+        "sequence_type": highlights.get("sequence_type"),
+        "exposure_seconds": highlights.get("exposure_seconds"),
+        "bin": highlights.get("bin"),
+        "camera_is_color": camera_is_color,
+        "debayer_pattern": debayer_pattern,
+    }
+
+
+def _configured_camera_context(config: AppConfig, device_name: str | None) -> dict[str, Any]:
+    try:
+        device = config.default_device() if not device_name else config.get_devices([device_name])[0]
+    except Exception:  # noqa: BLE001
+        return {}
+    return {
+        "camera_is_color": device.camera_is_color,
+        "debayer_pattern": device.debayer_pattern,
+    }
+
+
+def _rpc_result_for_method(snapshot: dict[str, Any], method: str) -> Any:
+    categories = snapshot.get("categories")
+    if not isinstance(categories, list):
+        return None
+    for category in categories:
+        items = category.get("items") if isinstance(category, dict) else None
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if isinstance(item, dict) and item.get("method") == method and item.get("ok"):
+                return item.get("result")
+    return None
+
+
+def _is_capture_context_page(page: str) -> bool:
+    normalized = page.lower().replace("_", "-").replace(" ", "-")
+    tokens = (
+        "plan",
+        "multi-target",
+        "multitarget",
+        "multi",
+        "target",
+        "target-plan",
+        "target-sequence",
+        "计划",
+        "多目标",
+    )
+    return any(token in normalized for token in tokens)
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
@@ -245,7 +332,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 query = parse_qs(parsed.query)
                 device = query.get("device", [None])[0]
                 force = query.get("refresh", ["0"])[0] in {"1", "true", "yes"}
-                self._send_json(current_image_response(self.server.config, device, force=force))
+                capture_context = _current_image_capture_context(self.server, device)
+                self._send_json(
+                    current_image_response(
+                        self.server.config,
+                        device,
+                        force=force,
+                        fallback_context=capture_context,
+                    )
+                )
             elif parsed.path == "/api/current-image-file":
                 query = parse_qs(parsed.query)
                 device = query.get("device", [None])[0]
@@ -258,11 +353,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     "application/octet-stream",
                 )
             elif parsed.path == "/api/materials/summary":
-                self._send_json(self.server.materials.summary())
+                self._send_json(self.server.materials().summary())
             elif parsed.path == "/api/materials/browse":
                 query = parse_qs(parsed.query)
                 self._send_json(
-                    self.server.materials.browse(
+                    self.server.materials().browse(
                         device=query.get("device", [""])[0],
                         source_label=query.get("source", [""])[0],
                         relative_path=query.get("path", [""])[0],
@@ -274,7 +369,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/materials":
                 query = parse_qs(parsed.query)
                 self._send_json(
-                    self.server.materials.list_materials(
+                    self.server.materials().list_materials(
                         device=query.get("device", [None])[0],
                         source_label=query.get("source", [None])[0],
                         mode=query.get("mode", [None])[0],
@@ -289,12 +384,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 query = parse_qs(parsed.query)
                 item_id = query.get("id", [""])[0]
                 force = query.get("force", ["0"])[0] in {"1", "true", "yes"}
-                preview = self.server.materials.ensure_preview(item_id, force=force)
+                preview = self.server.materials().ensure_preview(item_id, force=force)
                 self._send_file(Path(preview["path"]), str(preview["content_type"]))
             elif parsed.path == "/api/materials/thumb":
                 query = parse_qs(parsed.query)
                 item_id = query.get("id", [""])[0]
-                path = self.server.materials.thumbnail_path(item_id)
+                path = self.server.materials().thumbnail_path(item_id)
                 if path is None:
                     self.send_error(HTTPStatus.NOT_FOUND)
                 else:
@@ -303,7 +398,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/materials/preview-status":
                 query = parse_qs(parsed.query)
                 item_id = query.get("id", [""])[0]
-                self._send_json(self.server.materials.preview_status(item_id))
+                self._send_json(self.server.materials().preview_status(item_id))
             elif parsed.path == "/api/control-role":
                 query = parse_qs(parsed.query)
                 device = query.get("device", [None])[0]
@@ -348,6 +443,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send_json(self._camera_operation_state(device, session_id, operation_id))
             else:
                 self.send_error(HTTPStatus.NOT_FOUND)
+        except (BrokenPipeError, ConnectionResetError):
+            return
         except Exception as exc:  # noqa: BLE001
             self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
@@ -370,7 +467,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     )
                 )
             elif parsed.path == "/api/materials/scan":
-                self._send_json(self.server.materials.start_scan(force=bool(payload.get("force"))))
+                self._send_json(self.server.materials().start_scan(force=bool(payload.get("force"))))
             elif parsed.path == "/api/control-role":
                 device = str(payload.get("device") or "").strip()
                 session_id = str(payload.get("session_id") or "").strip()
@@ -458,6 +555,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self.send_error(HTTPStatus.NOT_FOUND)
         except BusyError as exc:
             self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.CONFLICT)
+        except (BrokenPipeError, ConnectionResetError):
+            return
         except ControlLeaseBusyError as exc:
             self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.CONFLICT)
         except PermissionError as exc:

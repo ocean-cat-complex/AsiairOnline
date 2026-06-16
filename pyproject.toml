@@ -3,6 +3,10 @@ name = "asiairbridge"
 version = "0.1.0"
 description = "Remote ASIAIR device backup and operations helper."
 requires-python = ">=3.12"
+dependencies = [
+    "colour-demosaicing>=0.2.7,<0.3",
+    "numpy>=2,<3",
+]
 
 [project.scripts]
 asiairbridge = "asiairbridge.cli:main"

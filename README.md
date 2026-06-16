@@ -5,7 +5,7 @@ ASIAIR monitoring and backup sidecar for macOS hosts on the same Tailscale or pr
 This macOS branch provides:
 
 - Live ASIAIR JSON-RPC monitoring with endpoint failover.
-- Current-image preview, guarded camera controls, and read-only mount status.
+- Current-image preview/cache, guarded camera controls, and read-only mount status.
 - The newer ASIAIR OPS pages with shared navigation for overview, camera, mount, and materials.
 - Local material index backed by the configured backup destination.
 - Incremental, dry-run-by-default backup from mounted ASIAIR SMB shares.
@@ -15,8 +15,10 @@ This macOS branch provides:
 
 - macOS with Homebrew arm64 Python 3.13 recommended.
 - Tailscale connected to the device subnet, or direct LAN access.
-- ASIAIR SMB shares mounted under `/Volumes/<device name>/...` before running backups.
+- ASIAIR SMB shares mounted under `/Volumes/<device name>/...` before running backups or local material indexing.
 - Python 3.12 or newer.
+
+Live `/api/current-image` does not require mounted shares. The sidecar reads ASIAIR's `get_current_img` preview stream directly from port `4800` or fallback port `4801`, decompresses the ZIP `raw_data`, and updates its own temporary current-image cache.
 
 ## Quick Start
 
@@ -104,6 +106,10 @@ Model each physical ASIAIR as one device with multiple `endpoints`:
 
 Read-only RPC and image reads try enabled endpoints in priority order. Write/control actions use the preferred endpoint by default to avoid duplicate commands if a response times out on one link.
 
+For live current-image display, the web API owns ASIAIR preview acquisition: it tries `get_current_img` on port `4800`, then `4801`, parses the ASIAIR header plus ZIP-compressed `raw_data`, stretches the 8/16-bit mono preview, and writes the PNG/raw cache into `state/image-preview/`. Do not wire 5010 or other display clients to local mounted volumes, ASIAIR storage scans, the backup destination, or the material-library SQLite index for current frames.
+
+The material-library SQLite index is lazy-loaded. It is only initialized when `/materials` or `/api/materials/*` is used; ordinary monitoring, status, and current-image requests do not create or read it.
+
 For backups, mount ASIAIR shares under paths that match `path_template`, for example:
 
 ```text
@@ -141,4 +147,4 @@ The web service binds to `127.0.0.1` by default. Use `HOST=0.0.0.0` only for int
 - `docs/asiair-image-preview.html`: camera frontend.
 - `docs/asiair-materials.html`: material library frontend.
 - `logs/`: per-run logs, git-ignored.
-- `state/`: runtime state, locks, caches, SQLite databases, and generated previews, git-ignored.
+- `state/`: runtime state, locks, caches, optional local SQLite indexes, current-image previews, and generated files, git-ignored.

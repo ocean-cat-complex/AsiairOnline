@@ -1114,28 +1114,115 @@ def _highlights(items: list[dict[str, Any]]) -> dict[str, Any]:
     frame_summary = capture.get("frame_summary", {}) if isinstance(capture, dict) else {}
     camera = by_method.get("get_camera_state", {}).get("result") or {}
     disk = by_method.get("get_disk_volume", {}).get("result") or {}
+    save_path = by_method.get("get_image_save_path", {}).get("result") or {}
 
     temp = _control_value_for(by_call, "Temperature")
     cool_power = _value_for(by_call, "get_control_value", ["CoolPowerPerc"])
     exposure = by_method.get("get_camera_exp_and_bin", {}).get("result") or {}
+    target_name = target.get("target_name") if isinstance(target, dict) else None
+    sequence_type = sequence.get("frame_type") if isinstance(sequence, dict) else None
+    planned_capture = _planned_capture_metadata(by_method, target_name, sequence_type)
+    exposure_seconds = planned_capture.get("exposure_seconds")
+    if exposure_seconds is None:
+        exposure_seconds = _exposure_seconds(exposure)
+    bin_value = planned_capture.get("bin")
+    if bin_value is None and isinstance(exposure, dict):
+        bin_value = exposure.get("bin")
     return {
         "page": app.get("page") if isinstance(app, dict) else None,
         "capture_state": capture.get("state") if isinstance(capture, dict) else None,
         "capture_working": capture.get("is_working") if isinstance(capture, dict) else None,
-        "target_name": target.get("target_name") if isinstance(target, dict) else None,
+        "target_name": target_name,
         "target_progress": _progress_pair(target),
-        "sequence_type": sequence.get("frame_type") if isinstance(sequence, dict) else None,
+        "sequence_type": sequence_type,
         "sequence_progress": _progress_pair(sequence),
         "frame_progress": _progress_pair(frame_summary),
         "camera_name": camera.get("name") if isinstance(camera, dict) else None,
         "camera_state": camera.get("state") if isinstance(camera, dict) else None,
-        "exposure_seconds": _exposure_seconds(exposure),
-        "bin": exposure.get("bin") if isinstance(exposure, dict) else None,
+        "exposure_seconds": exposure_seconds,
+        "exposure_source": planned_capture.get("source") or "camera_exp_and_bin",
+        "bin": bin_value,
         "temperature_c": temp,
         "cooler_power_percent": cool_power,
         "storage_free_mb": disk.get("freeMB") if isinstance(disk, dict) else None,
         "storage_total_mb": disk.get("totalMB") if isinstance(disk, dict) else None,
+        "current_storage": save_path.get("cur_storage") if isinstance(save_path, dict) else None,
+        "connected_storage": save_path.get("connected_storage") if isinstance(save_path, dict) else None,
     }
+
+
+def _planned_capture_metadata(
+    by_method: dict[str, dict[str, Any]],
+    target_name: Any,
+    sequence_type: Any,
+) -> dict[str, Any]:
+    target_text = str(target_name or "").strip()
+    if not target_text:
+        return {}
+
+    plan_result = by_method.get("get_plan", {}).get("result")
+    if isinstance(plan_result, list):
+        for plan in sorted(
+            plan_result,
+            key=lambda item: not bool(item.get("is_plan_started")) if isinstance(item, dict) else True,
+        ):
+            if not isinstance(plan, dict):
+                continue
+            for target in plan.get("targets") or []:
+                if not isinstance(target, dict) or not _same_target_name(target, target_text):
+                    continue
+                sequence = _select_planned_sequence(target.get("seqs"), sequence_type)
+                if sequence:
+                    return _planned_sequence_metadata(sequence, "plan_sequence")
+
+    target_sequences = by_method.get("get_target_sequences", {}).get("result")
+    if isinstance(target_sequences, dict) and _same_text(target_sequences.get("group_name"), target_text):
+        sequence = _select_planned_sequence(target_sequences.get("slots"), sequence_type)
+        if sequence:
+            return _planned_sequence_metadata(sequence, "target_sequences")
+    return {}
+
+
+def _same_target_name(target: dict[str, Any], target_text: str) -> bool:
+    return any(
+        _same_text(target.get(key), target_text)
+        for key in ("target_name", "target_original_name", "group_name")
+    )
+
+
+def _same_text(left: Any, right: Any) -> bool:
+    return str(left or "").strip().casefold() == str(right or "").strip().casefold()
+
+
+def _select_planned_sequence(sequences: Any, sequence_type: Any) -> dict[str, Any] | None:
+    if not isinstance(sequences, list):
+        return None
+    typed = [
+        item
+        for item in sequences
+        if isinstance(item, dict)
+        and (not sequence_type or _same_text(item.get("type"), sequence_type))
+    ]
+    candidates = typed or [item for item in sequences if isinstance(item, dict)]
+    enabled = [item for item in candidates if bool(item.get("enable"))]
+    return (enabled or candidates or [None])[0]
+
+
+def _planned_sequence_metadata(sequence: dict[str, Any], source: str) -> dict[str, Any]:
+    metadata: dict[str, Any] = {"source": source}
+    try:
+        exp = float(sequence.get("exp"))
+    except (TypeError, ValueError):
+        exp = 0.0
+    if exp > 0:
+        metadata["exposure_seconds"] = exp
+    if sequence.get("bin") is not None:
+        metadata["bin"] = sequence.get("bin")
+    if sequence.get("filter") is not None:
+        metadata["filter_position"] = sequence.get("filter")
+    if sequence.get("type") is not None:
+        metadata["sequence_type"] = sequence.get("type")
+    return metadata
 
 
 def _camera_cache_payload(server: Any, device: Device) -> dict[str, Any]:

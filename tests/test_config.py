@@ -93,6 +93,39 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(config.root, root.resolve())
             self.assertEqual(config.project.destination_root, (root / "state" / "backups").resolve())
 
+    def test_device_camera_metadata_is_parsed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / "devices.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "project": {"destination_root": "state/backups"},
+                        "backup": {
+                            "source_roots": [
+                                {
+                                    "label": "EMMC Images",
+                                    "path_template": "/Volumes/{name}/EMMC Images",
+                                }
+                            ]
+                        },
+                        "devices": [
+                            {
+                                "name": "sqa70",
+                                "ip": "192.168.8.10",
+                                "camera": {"is_color": True, "debayer_pattern": "RG"},
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            device = load_config(config_path).default_device()
+
+            self.assertTrue(device.camera_is_color)
+            self.assertEqual(device.debayer_pattern, "RG")
+
     def test_invalid_smb_port_reports_config_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

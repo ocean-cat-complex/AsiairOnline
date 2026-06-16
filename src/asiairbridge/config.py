@@ -41,6 +41,8 @@ class Device:
     enabled: bool = True
     endpoints: tuple[DeviceEndpoint, ...] = ()
     source_roots: tuple["SourceRoot", ...] | None = None
+    camera_is_color: bool | None = None
+    debayer_pattern: str | None = None
 
     def endpoint_candidates(self) -> tuple[DeviceEndpoint, ...]:
         endpoints = [endpoint for endpoint in self.endpoints if endpoint.enabled]
@@ -255,9 +257,42 @@ def _parse_devices(raw: list[dict[str, Any]]) -> tuple[Device, ...]:
                     if source_roots is not None
                     else None
                 ),
+                camera_is_color=_optional_bool(_device_camera_value(item, "is_color")),
+                debayer_pattern=_optional_text(_device_camera_value(item, "debayer_pattern")),
             )
         )
     return tuple(devices)
+
+
+def _device_camera_value(raw: dict[str, Any], key: str) -> Any:
+    camera = raw.get("camera")
+    if isinstance(camera, dict) and key in camera:
+        return camera.get(key)
+    if key in raw:
+        return raw.get(key)
+    prefixed = f"camera_{key}"
+    if prefixed in raw:
+        return raw.get(prefixed)
+    return None
+
+
+def _optional_bool(value: Any) -> bool | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on", "color", "colour", "彩色"}:
+            return True
+        if normalized in {"0", "false", "no", "off", "mono", "monochrome", "黑白"}:
+            return False
+    return bool(value)
+
+
+def _optional_text(value: Any) -> str | None:
+    text = str(value or "").strip()
+    return text or None
 
 
 def _parse_endpoints(raw: dict[str, Any], primary_ip: str) -> tuple[DeviceEndpoint, ...]:
