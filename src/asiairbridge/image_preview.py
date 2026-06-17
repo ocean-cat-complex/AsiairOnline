@@ -25,7 +25,8 @@ MAX_PACKET_BYTES = 192 * 1024 * 1024
 IMAGE_FIRST_BYTE_TIMEOUT_SECONDS = 330.0
 IMAGE_IDLE_TIMEOUT_SECONDS = 3.0
 CACHE_MAX_AGE_SECONDS = 30.0
-PREVIEW_MAX_EDGE = 2400
+PREVIEW_MAX_EDGE = 20000
+COLOR_PREVIEW_MAX_EDGE = 2400
 STF_HISTOGRAM_BINS = 4096
 STF_BLACK_CLIP_SIGMA = -2.8
 STF_TARGET_BACKGROUND = 0.25
@@ -63,6 +64,42 @@ class PreviewFrame:
     raw_bytes: int
     sample_step: int
     bytes_per_pixel: int
+
+
+def _cached_camera_meta(config: AppConfig, device: Device) -> tuple[int | None, int | None]:
+    try:
+        path = config.state_path() / "camera-cache" / f"{device.name}.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, ValueError):
+        return None, None
+    if not isinstance(data, dict):
+        return None, None
+    exposure_ms = None
+    exposure = data.get("exposure")
+    if isinstance(exposure, dict):
+        exposure_us = exposure.get("us")
+        seconds = exposure.get("seconds")
+        if isinstance(exposure_us, (int, float)):
+            exposure_ms = int(round(exposure_us / 1000))
+        elif isinstance(seconds, (int, float)):
+            exposure_ms = int(round(seconds * 1000))
+    chip_width = None
+    camera = data.get("camera")
+    if isinstance(camera, dict):
+        chip = camera.get("chip_size")
+        if isinstance(chip, (list, tuple)) and chip and isinstance(chip[0], (int, float)) and chip[0] > 0:
+            chip_width = int(chip[0])
+    return exposure_ms, chip_width
+
+
+def _frame_bin(frame_width: int | None, chip_width: int | None) -> int | None:
+    if not frame_width or not chip_width:
+        return None
+    ratio = chip_width / frame_width
+    nearest = round(ratio)
+    if 1 <= nearest <= 8 and abs(ratio - nearest) <= 0.15:
+        return nearest
+    return None
 
 
 def current_image_response(
@@ -106,10 +143,12 @@ def current_image_response(
             return _metadata_response(device, cached, refreshed=False)
 
         debayer_pattern = _refresh_debayer_pattern(capture_context, cached)
+        exposure_ms, chip_width = _cached_camera_meta(config, device)
         frame = fetch_current_image(device)
+        bin_value = _frame_bin(frame.width, chip_width)
         preview = build_preview_frame(
             frame,
-            max_edge=PREVIEW_MAX_EDGE,
+            max_edge=COLOR_PREVIEW_MAX_EDGE if debayer_pattern else PREVIEW_MAX_EDGE,
             preserve_bayer=bool(debayer_pattern),
         )
         normalized_raw = normalize_raw16be(preview.raw_data, preview.bytes_per_pixel)
@@ -138,14 +177,14 @@ def current_image_response(
                 "original_height": frame.height,
                 "sample_step": preview.sample_step,
                 "image_id": frame.image_id,
-                "bin": frame.bin_value,
-                "exposure_ms": frame.exposure_ms,
+                "bin": bin_value if bin_value is not None else frame.bin_value,
+                "exposure_ms": exposure_ms if exposure_ms is not None else frame.exposure_ms,
                 "packet_bytes": frame.packet_bytes,
                 "zip_bytes": frame.zip_bytes,
                 "raw_bytes": len(normalized_raw),
                 "source_raw_bytes": frame.raw_bytes,
                 "png_bytes": len(png_bytes),
-                "byte_order": "big",
+                "byte_order": stretch.get("byte_order") or "little",
                 "source_byte_order": stretch.get("byte_order"),
                 "source_bytes_per_pixel": frame.bytes_per_pixel,
                 "is_color": bool(debayer_pattern),
@@ -358,13 +397,9 @@ def normalize_raw16be(raw_data: bytes, bytes_per_pixel: int) -> bytes:
         return raw_data
     if bytes_per_pixel != 1:
         raise ValueError(f"Unsupported bytes_per_pixel: {bytes_per_pixel}")
-    normalized = bytearray(len(raw_data) * 2)
-    out_index = 0
-    for value in raw_data:
-        normalized[out_index] = value
-        normalized[out_index + 1] = value
-        out_index += 2
-    return bytes(normalized)
+    import numpy as np
+
+    return np.repeat(np.frombuffer(raw_data, dtype=np.uint8), 2).tobytes()
 
 
 def raw16_to_png(
@@ -746,14 +781,15 @@ def _hist_percentile(histogram: list[int], total: int, percentile: float) -> int
 
 
 def _raw16_histogram(raw_data: bytes, total_pixels: int, high_byte_offset: int, bins: int) -> list[int]:
-    histogram = [0] * bins
-    for pair_start in range(0, total_pixels * 2, 2):
-        if high_byte_offset == 0:
-            value = (raw_data[pair_start] << 8) | raw_data[pair_start + 1]
-        else:
-            value = (raw_data[pair_start + 1] << 8) | raw_data[pair_start]
-        histogram[min(bins - 1, (value * bins) >> 16)] += 1
-    return histogram
+    import numpy as np
+
+    arr = np.frombuffer(raw_data[: total_pixels * 2], dtype=np.uint8).reshape(-1, 2)
+    if high_byte_offset == 0:
+        values = (arr[:, 0].astype(np.uint16) << 8) | arr[:, 1].astype(np.uint16)
+    else:
+        values = (arr[:, 1].astype(np.uint16) << 8) | arr[:, 0].astype(np.uint16)
+    bucket = np.minimum(bins - 1, (values.astype(np.uint32) * bins) >> 16)
+    return np.bincount(bucket, minlength=bins).astype(int).tolist()
 
 
 def _stf_stretch_from_histogram(histogram: list[int], total: int, bins: int) -> dict[str, float]:
@@ -830,16 +866,14 @@ def _stf_lut(stretch: dict[str, float]) -> bytes:
 
 
 def _apply_raw16_lut(raw_data: bytes, total_pixels: int, high_byte_offset: int, lut: bytes) -> bytes:
-    pixels = bytearray(total_pixels)
-    out_index = 0
-    for pair_start in range(0, total_pixels * 2, 2):
-        if high_byte_offset == 0:
-            value = (raw_data[pair_start] << 8) | raw_data[pair_start + 1]
-        else:
-            value = (raw_data[pair_start + 1] << 8) | raw_data[pair_start]
-        pixels[out_index] = lut[value]
-        out_index += 1
-    return bytes(pixels)
+    import numpy as np
+
+    arr = np.frombuffer(raw_data[: total_pixels * 2], dtype=np.uint8).reshape(-1, 2)
+    if high_byte_offset == 0:
+        values = (arr[:, 0].astype(np.uint16) << 8) | arr[:, 1].astype(np.uint16)
+    else:
+        values = (arr[:, 1].astype(np.uint16) << 8) | arr[:, 0].astype(np.uint16)
+    return np.frombuffer(lut, dtype=np.uint8)[values].tobytes()
 
 
 def _midtone_for_target(target: float, source: float) -> float:
@@ -873,19 +907,14 @@ def _finite_number(value: float) -> bool:
 
 
 def _detect_high_byte_offset(raw_data: bytes) -> int:
-    even_hist = [0] * 256
-    odd_hist = [0] * 256
-    even_bytes = raw_data[0::2]
-    odd_bytes = raw_data[1::2]
-    for value in even_bytes:
-        even_hist[value] += 1
-    for value in odd_bytes:
-        odd_hist[value] += 1
+    import numpy as np
 
-    def score(hist: list[int]) -> float:
-        total = sum(hist)
-        mean = total / len(hist)
-        return sum((count - mean) ** 2 for count in hist)
+    arr = np.frombuffer(raw_data, dtype=np.uint8)
+    even_hist = np.bincount(arr[0::2], minlength=256).astype(np.float64)
+    odd_hist = np.bincount(arr[1::2], minlength=256).astype(np.float64)
+
+    def score(hist: Any) -> float:
+        return float(np.sum((hist - hist.mean()) ** 2))
 
     return 1 if score(odd_hist) > score(even_hist) else 0
 
@@ -901,7 +930,9 @@ def _metadata_response(device: Device, metadata: dict[str, Any], refreshed: bool
     if generated_at:
         payload["image_url"] = _image_url(device, str(preview_generated_at or generated_at))
         image = payload.get("image")
-        if isinstance(image, dict) and image.get("raw_bytes"):
+        # The browser-side 16-bit stretch is mono-only. Keep Bayer/color frames
+        # on the debayered PNG path so they do not render as a grayscale mosaic.
+        if isinstance(image, dict) and image.get("raw_bytes") and not image.get("is_color"):
             payload["raw_url"] = _raw_url(device, str(generated_at))
         else:
             payload.pop("raw_url", None)

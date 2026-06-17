@@ -31,7 +31,9 @@ html[data-skin="C"] #cursor-tip::before{left:4px;width:7px;background:var(--ac)}
 /* 主遥测带 */
 .kicker{display:none;text-align:center;font:300 10.5px var(--body);letter-spacing:.5em;color:var(--ac);text-transform:uppercase}
 html[data-skin="B"] .kicker{display:block}
-.telemetry{position:fixed;top:62px;left:50%;transform:translateX(-50%);z-index:20;text-align:center}
+/* 居中不用 transform:.telemetry 带 .seq 入场动画,opsSeq 收尾 transform:none 会覆盖 translateX(-50%) 导致偏右;
+   改用 left:0/right:栏宽 + margin:auto 在内容区(去掉右栏)居中,动画(只动 translateY/opacity)互不干扰 */
+.telemetry{position:fixed;top:104px;left:0;right:286px;margin-inline:auto;width:-moz-fit-content;width:fit-content;max-width:calc(100vw - 286px);z-index:20;text-align:center}
 .telemetry .row{display:flex;gap:44px;justify-content:center}
 .tele .tl{font:var(--lab-w) 10.5px var(--display);letter-spacing:.32em;color:var(--muted);text-transform:var(--lab-tt)}
 .tele .tv{margin-top:4px;font:700 30px/1.1 var(--mono);color:var(--ac);font-variant-numeric:tabular-nums;
@@ -62,10 +64,7 @@ html[data-skin="B"] .csep{display:none}
   padding:13px 24px;border:1px solid var(--ac-soft);color:var(--ac);background:var(--scrim);
   font:var(--lab-w) 14px var(--display);letter-spacing:.12em;text-transform:var(--lab-tt)}
 .notice.show{display:block}
-.demo-flag{position:fixed;left:24px;top:150px;z-index:20;display:none;
-  font:var(--lab-w) 10px var(--display);letter-spacing:.24em;color:var(--bg);background:var(--warn);
-  padding:3px 9px;text-transform:var(--lab-tt)}
-.demo-flag.show{display:block}
+#mount-offline{position:fixed;left:0;top:0;width:100%;height:100%;z-index:18;display:none;pointer-events:none}
 .phys-note{position:fixed;left:24px;bottom:118px;z-index:20;max-width:330px;
   font:italic 300 12px var(--body);color:var(--muted);
   background:linear-gradient(90deg,var(--scrim) 60%,var(--scrim0));padding:6px 18px 6px 0}
@@ -81,13 +80,42 @@ html[data-skin="A"] .phys-note,html[data-skin="C"] .phys-note{font-style:normal;
   .phys-note{position:static;max-width:none;margin:0 18px}
   #sky{position:fixed}
 }
+
+/* 入场编排修订:赤道仪页的遥测带 / 右栏注记 / 物理说明 / 底部状态都是异步填充的,
+   若沿用主题层"加载即按时间轴淡入",慢网或断连回退时空容器会先于内容浮现,顺序就乱了。
+   做法:先把所有 .seq 暂停在隐藏起始态,等首次遥测就绪(poll 结束)再统一放行,
+   届时各段已填好内容,按 d1/d2 自上而下依次浮现。reduce 用户不受影响(本块在 no-preference 内)。 */
+@media (prefers-reduced-motion:no-preference){
+  .seq{animation-play-state:paused}
+  body.ready .seq{animation-play-state:running}
+}
+
+/* 能力标签(Ⅳ 能力)不再整块淡入,而是一个一个依次浮现。
+   容器自身用一个近乎即时的 opacity 切换占住它在级联中的档位(.34s,排在右栏 d1 之后),
+   不做时长淡入 —— 否则父级 opacity 渐变会"罩住"子项,逐项错峰就看不出来了。
+   逐项浮现只在首次揭幕(.caps.reveal)期间生效,其后轮询刷新不重放(见脚本)。 */
+@media (prefers-reduced-motion:no-preference){
+  .caps{opacity:0}
+  body.ready .caps{animation:capsFrameIn .01s linear .34s forwards}
+  @keyframes capsFrameIn{to{opacity:1}}
+  body.ready .caps.reveal .cap{
+    opacity:0;transform:translateY(6px);
+    animation:opsSeq .46s cubic-bezier(.2,.7,.3,1) both;
+    animation-delay:calc(.36s + var(--ci,0) * .07s);
+  }
+}
 </style>
 </head>
 <body>
 <canvas id="sky"></canvas>
 <div class="vignette"></div><div class="frame"></div>
 <div id="cursor-tip"></div>
-<span class="demo-flag" id="demo-flag">演示遥测 DEMO</span>
+<div class="ops-disconnected" id="mount-offline" style="display:none">
+  <div class="ring"></div>
+  <h4>盒子未连接</h4>
+  <div class="sub" id="mount-offline-sub">--</div>
+  <div class="note" id="mount-offline-note">正在重试连接…</div>
+</div>
 <div id="notice" class="notice">赤道仪未连接 —— 连接后自动恢复实时遥测</div>
 
 <div class="telemetry seq">
@@ -133,7 +161,6 @@ html[data-skin="A"] .phys-note,html[data-skin="C"] .phys-note{font-style:normal;
     <button id="speed-600"  class="con" type="button">×600</button>
     <button id="speed-3600" class="con" type="button">×3600</button>
     <span class="csep"></span>
-    <button id="demo-slew" class="con" type="button" style="display:none">演示转向 → M45</button>
     <button id="raw-toggle" class="con" type="button">RAW</button>
     <span class="con-note" style="margin-left:auto">拖拽转视角 · 滚轮缩放 · 悬停读坐标 · 只读</span>
   </div>
@@ -150,7 +177,7 @@ html[data-skin="A"] .phys-note,html[data-skin="C"] .phys-note{font-style:normal;
 </div>
 
 <script>
-/* ════════ 引擎:真实遥测优先,断连回退演示;三皮肤共用 ════════ */
+/* ════════ 引擎:真实遥测;断连显示"未连接"界面(不再回退演示);三皮肤共用 ════════ */
 const $=id=>document.getElementById(id);
 const OPS=window.OPS;
 const REDUCED=matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -165,13 +192,14 @@ const SKINS={
 };
 const sk=()=>SKINS[document.documentElement.dataset.skin]||SKINS.B;
 
-let MODE="boot";              // live | demo
+let MODE="boot";              // live | offline
 let skyEq=1,skyAlt=0,skyGnd=1,gEq=0,gAlt=0,gGnd=0;
 let vAz=160,vEl=26,vFov=58;
 let timeScale=1,simMs=Date.now();
 let aimed=false,userMoved=false;
 let reveal=REDUCED?1:0,HI=null,meteors=[];
-let model=null;               // 渲染模型(由真实或演示遥测构建)
+let revealed=false;           // 入场动画首次放行标记(与上面的 canvas reveal 无关)
+let model=null;               // 渲染模型(由真实遥测构建)
 let slew=null,targetIdx=0;
 
 const pad=n=>String(n).padStart(2,"0");
@@ -204,10 +232,10 @@ function hexA(hex,a){const h=hex.replace("#","");
   return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`;}
 
 /* ── 模型构建:跟踪→锁赤道坐标;未跟踪→锁地平坐标 ── */
-function buildModel(d,demo){
+function buildModel(d){
   const p=d.position||{},s=d.site||{},t=d.target||{};
   const lst0=p.lst_hours!=null?p.lst_hours:lstHours(new Date(),s.lng||0);
-  const m={demo:!!demo,raw:d,connected:!!d.connected,ok:d.ok!==false,
+  const m={raw:d,connected:!!d.connected,ok:d.ok!==false,
     lat:s.lat??40,lng:s.lng??116,
     tracking:d.tracking===true,slewing:!!(t.slewing),
     scopeEq:{ra:p.ra_hours,dec:p.dec_degrees},
@@ -238,10 +266,25 @@ function setLamp(id,text,state){const el=$(id);
 function setText(id,v){const el=$(id);if(!el)return;
   const s=(v==null||v==="")?"--":v;if(el.textContent!==s)el.textContent=s;}
 let capsSig="";
-function renderStatic(d,demo){
+/* 盒子离线界面:盖在天球上,数据栏清空,不再回退演示遥测 */
+function setMountOffline(on,note){
+  const box=$("mount-offline"),sky=$("sky"),c=OPS.conn||{};
+  $("notice").classList.remove("show");
+  if(on){
+    const nm=c.name||OPS.device||"",ip=c.ip||"";
+    $("mount-offline-sub").textContent=[nm,ip].filter(Boolean).join(" · ")||"--";
+    $("mount-offline-note").textContent=note||("正在每 2 秒重试连接…"+(c.lastSeenMs?(" · 最后在线 "+OPS.fmtAgo((Date.now()-c.lastSeenMs)/1000)):""));
+    if(sky)sky.style.opacity=".12";
+    box.style.display="flex";
+    ["pierside","t-name","t-ra","t-dec","t-angle","lat","lng","ra","dec","lst"].forEach(id=>setText(id,null));
+    setLamp("tracking","--","");setLamp("moving","--","");
+    $("status-kind").textContent="[OFF]";$("status-kind").style.color="var(--bad)";
+    $("status-text").textContent="盒子未连接 · 无法访问 "+(ip||"赤道仪")+"(检查盒子电源/网络)";
+    $("phys-note").textContent="";
+  }else{box.style.display="none";if(sky)sky.style.opacity="";}
+}
+function renderStatic(d){
   $("notice").classList.toggle("show",d.ok!==false&&!d.connected);
-  $("demo-flag").classList.toggle("show",!!demo);
-  $("demo-slew").style.display=demo?"":"none";
   setLamp("tracking",d.tracking===true?"开启":d.tracking===false?"关闭":"--",d.tracking===true?"on":"");
   setLamp("moving",d.moving_text||"--",d.is_moving?"warn":"");
   setText("pierside",d.pier_side_text);
@@ -253,13 +296,13 @@ function renderStatic(d,demo){
   setText("lat",s.lat_text);setText("lng",s.lng_text);
   const sig=(d.capabilities||[]).join("|");
   if(sig!==capsSig){capsSig=sig;const c=$("caps");c.innerHTML="";
-    (d.capabilities||[]).forEach(x=>{const e=document.createElement("span");e.className="cap";e.textContent=x;c.appendChild(e);});}
+    (d.capabilities||[]).forEach((x,i)=>{const e=document.createElement("span");e.className="cap";e.textContent=x;e.style.setProperty("--ci",i);c.appendChild(e);});}
   $("raw").textContent=JSON.stringify(d.raw||{},null,2);
   const kind=d.ok===false?"ERR":d.connected?"OK":"WARN";
   $("status-kind").textContent=`[${kind}]`;
   $("status-kind").style.color=d.ok===false?"var(--bad)":d.connected?"var(--good)":"var(--warn)";
   $("status-text").textContent=d.ok===false?(d.error||"查询失败")
-    :d.connected?`赤道仪在线 · ${(d.device&&d.device.name)||""}${demo?" · 演示遥测":""}${timeScale>1?` · 预览时间×${timeScale}`:""}`
+    :d.connected?`赤道仪在线 · ${(d.device&&d.device.name)||""}${timeScale>1?` · 预览时间×${timeScale}`:""}`
     :"赤道仪未连接";
   $("snapshot").textContent=d.snapshot_at||"--";
   $("phys-note").textContent=
@@ -275,25 +318,11 @@ function renderTick(){ /* 每帧:坐标读数随模型推进 */
   if(slew){setLamp("moving","转向中","warn");$("goto-hint").textContent="· 转向中…";}
 }
 
-/* ── 演示遥测(API 不可达) ── */
-const DEMO_SITE={lat:38.61,lng:99.13,lat_text:"N 38°36′36″",lng_text:"E 99°07′48″"};
-const TGT=[{name:"M31 仙女座星系",ra:.7123,dec:41.269},{name:"M45 昴星团",ra:3.791,dec:24.117}];
-function demoData(){
-  const now=new Date(simMs),lst=lstHours(now,DEMO_SITE.lng),t=TGT[targetIdx];
-  return{ok:true,connected:true,tracking:true,is_moving:!!slew,moving_text:slew?"转向中":"静止",
-    pier_side_text:"西侧 West",device:{name:"演示 · EQ8-R Pro"},
-    position:{ra_hours:t.ra,dec_degrees:t.dec,lst_hours:lst},
-    site:DEMO_SITE,
-    target:{name:t.name,ra_hours:t.ra,dec_degrees:t.dec,ra_text:fmtHMS(t.ra),dec_text:fmtDMS(t.dec),angle:0,slewing:!!slew},
-    capabilities:["goto","tracking","park","home","guide","sync"],
-    raw:{Note:"DEMO TELEMETRY — 后端不可达",Target:t.name,TimeScale:timeScale},
-    snapshot_at:now.toLocaleString("zh-CN",{hour12:false})};
-}
-
 /* ── 天球绘制 ── */
 const cv=$("sky"),ctx=cv.getContext("2d");
 const STARS=(()=>{let s=20260612;const rnd=()=>{s^=s<<13;s^=s>>>17;s^=s<<5;return((s>>>0)/4294967296);};
   return Array.from({length:380},()=>({ra:rnd()*24,dec:Math.asin(2*rnd()-1)/RAD,m:rnd(),ph:rnd()*6.28,sp:.5+rnd()*1.5}));})();
+const SKY_VC=0.75;  /* 天球投影竖直中心比例:0.5=屏幕正中;0.75=下移,天空占上 3/4、地面缩到底部 1/4(地面不在意)*/
 function project(az,alt,scale,cx,cy){
   const a=az*RAD,e=alt*RAD,a0=vAz*RAD,e0=vEl*RAD;
   const c=Math.sin(e0)*Math.sin(e)+Math.cos(e0)*Math.cos(e)*Math.cos(a-a0);
@@ -323,7 +352,7 @@ function drawSky(now,dt){
   ctx.fillStyle=cssv("--sky-bg");ctx.fillRect(0,0,w,h);
   if(!model)return;
   const lst=lstNow(),lat=model.lat;
-  const cx=w/2,cy=h/2,scale=Math.min(w,h)/(vFov*RAD);
+  const cx=w/2,cy=h*SKY_VC,scale=Math.min(w,h)/(vFov*RAD);
   const P=(az,alt)=>project(az,alt,scale,cx,cy);
   const rv=reveal,ts=now/1000;
 
@@ -423,8 +452,7 @@ function loop(now){
   const ease=(c,t)=>c+(t-c)*Math.min(1,dt*5);
   gEq=ease(gEq,skyEq);gAlt=ease(gAlt,skyAlt);gGnd=ease(gGnd,skyGnd);
   drawSky(now,dt);
-  if(now-lastDom>200){lastDom=now;renderTick();
-    if(MODE==="demo")renderStatic(demoData(),true);}
+  if(now-lastDom>200){lastDom=now;renderTick();}
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
@@ -443,7 +471,7 @@ const tip=$("cursor-tip");
     }
     if(!model)return;
     const scale=Math.min(cv.clientWidth,cv.clientHeight)/(vFov*RAD);
-    const aa=invProject(e.clientX,e.clientY,scale,cv.clientWidth/2,cv.clientHeight/2);
+    const aa=invProject(e.clientX,e.clientY,scale,cv.clientWidth/2,cv.clientHeight*SKY_VC);
     if(aa.alt<-2){tip.style.display="none";return;}
     const eq=altAzToEq(aa.az,aa.alt,lstNow(),model.lat);
     tip.textContent=`RA ${fmtHMS(eq.ra)} · Dec ${fmtDMS(eq.dec)}`;
@@ -462,11 +490,6 @@ const tip=$("cursor-tip");
     if(v===1)simMs=Date.now();           /* 回到实时 */
     timeScale=v;
     ["speed-1","speed-600","speed-3600"].forEach(i=>$(i).classList.toggle("on",i===id));}));
-$("demo-slew").addEventListener("click",()=>{
-  if(MODE!=="demo"||slew)return;
-  const from=TGT[targetIdx];targetIdx=1-targetIdx;const to=TGT[targetIdx];
-  slew={t0:Date.now(),dur:4500,from:{ra:from.ra,dec:from.dec},to:{ra:to.ra,dec:to.dec}};
-  $("demo-slew").textContent=`演示转向 → ${TGT[1-targetIdx].name.split(" ")[0]}`;});
 $("raw-toggle").addEventListener("click",()=>$("raw-drawer").classList.toggle("open"));
 $("raw-close").addEventListener("click",()=>$("raw-drawer").classList.remove("open"));
 document.querySelectorAll("[data-hi]").forEach(el=>{
@@ -479,21 +502,30 @@ async function poll(){
     /* 接入修订:后端 mount-state 串行 RPC 上限约 2.5s×N,1800ms 会被正常抖动击穿 */
     const d=await OPS.fetchJSON("/api/mount-state"+(OPS.device?`?device=${encodeURIComponent(OPS.device)}`:""),{timeout:6000});
     MODE="live";
+    OPS.reportConn(true,{ip:d.device&&d.device.ip,name:d.device&&d.device.name});
     if(timeScale===1)simMs=Date.now();   /* 实时模式持续校准 */
-    model=buildModel(d,false);
+    model=buildModel(d);
     if(!aimed&&!userMoved&&model.scopeAA){aimed=true;
       vAz=model.scopeAA.az;vEl=Math.max(8,Math.min(65,model.scopeAA.alt));}
-    renderStatic(d,false);
+    setMountOffline(false);
+    renderStatic(d);
   }catch(e){
-    /* 设计特性(用户确认):后端断连时回退演示遥测并亮 DEMO 角标;
-       超时已从 1800ms 放宽到 6000ms,只有持续断连才会进入演示模式 */
-    if(MODE!=="demo"){MODE="demo";simMs=Date.now();}
-    model=buildModel(demoData(),true);
-    if(!aimed&&!userMoved&&model.scopeAA){aimed=true;
-      vAz=model.scopeAA.az;vEl=Math.max(8,Math.min(65,model.scopeAA.alt));}
+    OPS.reportConn(false,{name:OPS.device});
+    /* 走迟滞:grace 窗口内的瞬时失败维持上次实时遥测,不闪"未连接";持续超过 grace 才进离线界面 */
+    if(OPS.conn.online===false){ MODE="offline"; setMountOffline(true); }
+  }finally{
+    /* 首次轮询结束(成功或失败)后统一放行入场动画,保证自上而下且内容已就位 */
+    if(!revealed){revealed=true;requestAnimationFrame(()=>{
+      document.body.classList.add("ready");
+      /* 能力标签逐项浮现:仅首次揭幕加 .reveal,级联跑完即移除,避免轮询刷新重放 */
+      const caps=$("caps");caps.classList.add("reveal");
+      const n=caps.querySelectorAll(".cap").length;
+      setTimeout(()=>caps.classList.remove("reveal"),360+n*70+800);
+    });}
   }
 }
 $("refresh-btn").addEventListener("click",poll);
+
 poll();setInterval(()=>{if(!OPS.hidden())poll();},2000);
 </script>
 </body>

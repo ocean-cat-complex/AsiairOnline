@@ -55,22 +55,26 @@ a{color:inherit}
 /* —— 顶栏 —— */
 .ops-top{position:fixed;left:0;right:0;top:0;z-index:60;display:flex;align-items:center;gap:18px;
   padding:10px 22px;background:linear-gradient(180deg,var(--scrim),var(--scrim0))}
+.ops-top::before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;
+  backdrop-filter:blur(9px);-webkit-backdrop-filter:blur(9px);
+  -webkit-mask-image:linear-gradient(180deg,#000 62%,transparent);
+  mask-image:linear-gradient(180deg,#000 62%,transparent)}
 .ops-brand{line-height:1.15;white-space:nowrap}
 .ops-brand b{display:block;font:600 17px var(--display);letter-spacing:.16em}
 html[data-skin="B"] .ops-brand b{font-weight:600;letter-spacing:.12em}
 .ops-brand span{font:var(--lab-w) 9.5px var(--display);letter-spacing:.38em;color:var(--ac);text-transform:uppercase}
-.ops-nav{display:flex;gap:6px}
+.ops-nav{display:flex;gap:6px;margin-left:28px}
 html[data-skin="B"] .ops-nav{gap:22px}
-.ops-nav a{position:relative;color:var(--muted);text-decoration:none;font:var(--lab-w) 14px var(--display);
-  letter-spacing:.16em;padding:5px 10px;text-transform:var(--lab-tt)}
+.ops-nav a{position:relative;color:var(--muted);text-decoration:none;font:var(--lab-w) 16px var(--display);
+  letter-spacing:.08em;padding:5px 10px;text-transform:var(--lab-tt)}
 .ops-nav a:hover{color:var(--text)}
 .ops-nav a.active{color:var(--text)}
 html[data-skin="B"] .ops-nav a.active::after{content:"";position:absolute;left:14%;right:14%;bottom:0;height:1px;background:var(--ac)}
 .ops-spacer{flex:1}
 .ops-acts{display:flex;align-items:center;gap:12px;font-size:12px;color:var(--muted)}
-#ops-clock{font:500 12px var(--mono);font-variant-numeric:tabular-nums;color:var(--muted)}
-.ops-lamp{display:inline-flex;align-items:center;gap:7px;font:var(--lab-w) 11px var(--display);
-  letter-spacing:.14em;padding:3px 11px;border:1px solid var(--line);border-radius:var(--pill);text-transform:var(--lab-tt)}
+#ops-clock{font:500 14px var(--mono);font-variant-numeric:tabular-nums;color:var(--muted)}
+.ops-lamp{display:inline-flex;align-items:center;gap:7px;font:var(--lab-w) 13px var(--display);
+  letter-spacing:.08em;padding:3px 11px;border:1px solid var(--line);border-radius:var(--pill);text-transform:var(--lab-tt)}
 .ops-lamp i{width:7px;height:7px;border-radius:50%;background:var(--quiet)}
 html[data-skin="B"] .ops-lamp i{transform:rotate(45deg);border-radius:0;width:6px;height:6px}
 .ops-lamp.self{color:var(--ac);border-color:var(--ac-soft)}
@@ -78,7 +82,9 @@ html[data-skin="B"] .ops-lamp i{transform:rotate(45deg);border-radius:0;width:6p
 .ops-lamp.busy{color:var(--warn);border-color:var(--warn)}
 .ops-lamp.busy i{background:var(--warn)}
 select.ops-sel{background:transparent;color:var(--text);border:1px solid var(--line);border-radius:var(--pill);
-  font:400 12px var(--body);padding:4px 10px;min-width:96px}
+  font:400 14px var(--body);padding:4px 10px;min-width:96px}
+#ops-device{color:var(--ac);border-color:var(--ac-soft)}
+#ops-device option{color:var(--text);background:var(--bg)}
 select.ops-sel:focus-visible{outline:1px solid var(--ac);outline-offset:2px}
 
 /* —— 通用:数据行 / 分组 / 按钮 / 抽屉 / 状态行 —— */
@@ -135,6 +141,20 @@ html[data-skin="B"] .statusline .msg{flex:0 1 auto;max-width:56vw}
 /* 大数字 */
 .bignum{font:700 32px/1.1 var(--mono);font-variant-numeric:tabular-nums;color:var(--ac);text-shadow:var(--glow);white-space:nowrap}
 html[data-skin="B"] .bignum{font:500 38px/1.1 var(--display);color:var(--text)}
+
+/* —— 连通性:顶栏盒子灯 + 通用离线界面(全站一致) —— */
+.ops-lamp.off{color:var(--bad);border-color:var(--bad)}
+.ops-lamp.off i{background:var(--bad);animation:opsConnBlink 2.2s ease-in-out infinite}
+@keyframes opsConnBlink{0%,100%{opacity:1}50%{opacity:.28}}
+.ops-disconnected{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.55em;
+  text-align:center;color:var(--muted);padding:7vh 1em;min-height:220px}
+.ops-disconnected .ring{width:48px;height:48px;border:1.5px solid var(--ac-soft);border-radius:50%;
+  position:relative;margin-bottom:.45em;animation:opsConnPulse 2.4s ease-in-out infinite}
+.ops-disconnected .ring::after{content:"";position:absolute;inset:35%;border-radius:50%;background:var(--bad)}
+.ops-disconnected h4{margin:0;font:500 23px var(--display);letter-spacing:.14em;color:var(--text)}
+.ops-disconnected .sub{font:500 14px var(--mono);color:var(--ac);letter-spacing:.05em}
+.ops-disconnected .note{font:italic 300 13px var(--body);color:var(--quiet);max-width:30em;line-height:1.7}
+@keyframes opsConnPulse{0%,100%{opacity:.45;transform:scale(.95)}50%{opacity:1;transform:scale(1.05)}}
 `;
 
 const style = document.createElement("style");
@@ -199,10 +219,84 @@ API.scanAllowed = () => API.access.scan_allowed !== false;
 API.actionEntry = (page) => `${location.origin}/${page}${API.device?`?device=${encodeURIComponent(API.device)}`:""}`;
 API.hidden = () => document.hidden;
 
+/* ── 连通性:盒子可达状态 + 顶栏灯 + 离线广播(全站统一,各页可 onConn 监听) ── */
+API.conn = { online:null, ip:"", name:"", lastSeenMs:null, _reportedAtMs:0 };
+API._connCbs = [];
+API.onConn = function(cb){ this._connCbs.push(cb); if(this.conn.online!==null){ try{ cb(this.conn); }catch(e){} } };
+/* 从 /api/camera-state 推断盒子是否在线。关键:camera_cache 会保留上次在线时的相机型号/曝光等旧值,
+   盒子再次掉线时这些字段仍有值,所以不能用"有没有字段"判断——必须看本轮 errors 里核心 RPC(尤其
+   心跳 get_app_state)是否正在超时/不可达。 */
+API.deriveOnline = function(cs){
+  if(!cs) return null;
+  const errs = cs.errors || [];
+  const conn = e => /tim(e|ed)?\s*out|timeout|unreachable|refus|no route|reset|connection|不可达/i.test(String((e&&e.error)||""));
+  /* 心跳 get_app_state 当前不可达 → 离线(即使缓存里仍有相机型号/曝光旧值) */
+  if(errs.some(e => e && e.method==="get_app_state" && conn(e))) return false;
+  /* 多个核心读当前不可达 → 离线 */
+  const core = ["get_app_state","get_camera_state","get_camera_info","get_camera_exp_and_bin"];
+  if(errs.filter(e => e && core.indexOf(e.method)>=0 && conn(e)).length >= 2) return false;
+  if(!cs.partial) return true;
+  /* 部分但核心字段全空 → 离线(硬离线、无缓存) */
+  const cam=cs.camera||{}, app=cs.app||{}, exp=cs.exposure||{};
+  return !(!cam.name && app.capture_state==null && exp.seconds==null && !cam.chip_size);
+};
+function renderConn(){
+  const el = document.getElementById("ops-conn"); if(!el) return;
+  const c = API.conn, lab = el.querySelector("span");
+  if(c.online===null){ el.className="ops-lamp"; lab.textContent="盒子 --"; el.removeAttribute("title"); return; }
+  if(c.online){ el.className="ops-lamp self"; lab.textContent="盒子在线";
+    el.title = c.ip ? ("已连接 "+c.ip) : "已连接"; return; }
+  el.className="ops-lamp off"; lab.textContent="盒子未连接";
+  const ago = c.lastSeenMs!=null ? API.fmtAgo((Date.now()-c.lastSeenMs)/1000) : null;
+  el.title = (c.ip ? ("无法访问 "+c.ip) : "盒子无响应") + (ago ? (" · 最后在线 "+ago) : "");
+}
+API._renderConn = renderConn;
+/* 离线迟滞:单次轮询失败/心跳 RPC 超时(Tailscale 抖动、盒子曝光读出或下载时忙)不立刻翻离线,
+   须持续无成功联系 ≥ OFFLINE_GRACE_MS 才真正判离线;恢复(任一次在线)立即生效。
+   首次加载且从未联系过(lastSeenMs==null)时立即判离线,不空等。 */
+API.OFFLINE_GRACE_MS = 12000;
+function applyConn(online, meta, fromReport){
+  const c = API.conn;
+  if(fromReport) c._reportedAtMs = Date.now();
+  if(online==null) return;
+  if(meta){ if(meta.ip) c.ip=meta.ip; if(meta.name) c.name=meta.name; }
+  const now = Date.now();
+  let eff;
+  if(online){ c.lastSeenMs = now; eff = true; }
+  else{
+    const downMs = c.lastSeenMs!=null ? (now - c.lastSeenMs) : Infinity;
+    eff = downMs >= API.OFFLINE_GRACE_MS ? false : (c.online===false ? false : null);
+  }
+  if(eff==null) return;            /* grace 窗口内的瞬时失败:维持原状态,等下一轮 */
+  const was = c.online;
+  c.online = eff;
+  renderConn();
+  if(was!==eff){
+    if(document.body) document.body.classList.toggle("box-offline", eff===false);
+    API._connCbs.forEach(cb=>{ try{ cb(c); }catch(e){} });
+    try{ document.dispatchEvent(new CustomEvent("ops:conn",{detail:c})); }catch(e){}
+  }
+}
+/* 各 box 依赖页从自己已有轮询调用,带来最新鲜的判断;调用后 8s 内抑制下方兜底探测 */
+API.reportConn = function(online, meta){ applyConn(online, meta, true); };
+/* 兜底探测:无页面自报(如素材库/高级页)时,主题层自行用 camera-state 探活,保证顶栏灯全站可用 */
+async function connProbe(){
+  if(API.hidden && API.hidden()) return;
+  if(Date.now() - API.conn._reportedAtMs < 8000) return;
+  if(!API.device) return;
+  try{
+    const cs = await API.fetchJSON("/api/camera-state?device="+encodeURIComponent(API.device), { timeout:6000 });
+    applyConn(API.deriveOnline(cs), { ip: cs && cs.device && cs.device.ip, name: cs && cs.device && cs.device.name }, false);
+  }catch(e){ /* 桥不可达:不翻转状态,等下一轮 */ }
+}
+API._connProbe = connProbe;
+/* 离线时每秒刷新顶栏灯的"最后在线"相对时间 */
+setInterval(() => { if(API.conn.online===false) renderConn(); }, 1000);
+
 /* ───────────────────────── 3. 顶栏注入 ───────────────────────── */
 function initDom(){
 
-const NAV = [["总览","/monitor-minterm"],["相机","/camera"],["赤道仪","/mount"],["素材库","/materials"]];
+const NAV = [["总览","/monitor-minterm"],["相机","/camera"],["赤道仪","/mount"],["素材库","/materials"],["高级","/advanced"]];
 const here = location.pathname;
 const isActive = (p) => {
   if (p === "/monitor-minterm") return here === "/" || here.startsWith("/monitor-minterm");
@@ -224,6 +318,7 @@ top.innerHTML = `
     <select id="ops-role" class="ops-sel" aria-label="协作模式">
       <option value="monitor">监控</option><option value="controller">主控</option>
     </select>
+    <span id="ops-conn" class="ops-lamp"><i></i><span>盒子 --</span></span>
     <span id="ops-control" class="ops-lamp"><i></i><span id="ops-control-text">主控空闲</span></span>
   </div>`;
 document.body.prepend(top);
@@ -244,6 +339,7 @@ fetch("/api/devices").then(r=>r.json()).then(d=>{
   API.device = cur;
   syncNavDevice();
   pollRole();  /* 接入修订:设备就绪后立即补一次主控轮询,消除首轮竞态空窗 */
+  connProbe(); /* 设备就绪后立即探一次盒子连通性,顶栏灯不留空窗 */
 }).catch(()=>{ /* 设备列表不可达时保持空,页面自处理 */ });
 
 devSel.addEventListener("change", () => {
@@ -285,19 +381,35 @@ function renderRole(p){
   roleSel.value = self ? "controller" : "monitor";
   API._cbs.forEach(cb => { try{ cb(p); }catch(e){} });
 }
+function postRole(role){
+  return fetch("/api/control-role", { method:"POST",
+    headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify({ device: API.device || "", session_id: sid, session_label:"web", role }) });
+}
 async function pollRole(){
   if (!API.device) return;  /* 接入修订:设备未就绪时后端会拒绝 device 空参,跳过本轮 */
   try{
-    const q = new URLSearchParams({ device: API.device || "", session_id: sid });
-    const r = await fetch(`/api/control-role?${q}`, { cache:"no-store" });
-    if (r.ok) renderRole(await r.json());
+    let r;
+    if (API.heldBySelf){
+      /* 续租心跳:作为主控时每轮用 POST 刷新 45s 租约(后端只有 POST 续租,GET 不续);
+         否则切页/空闲后租约到期会自动掉主控——全局问题,在共享主题层统一修复 */
+      r = await postRole("controller");
+    } else {
+      const q = new URLSearchParams({ device: API.device || "", session_id: sid });
+      r = await fetch(`/api/control-role?${q}`, { cache:"no-store" });
+    }
+    if (!r || !r.ok) return;
+    const wasSelf = API.heldBySelf;
+    renderRole(await r.json());
+    /* 切页后新页首轮以 GET 发现仍持有主控 → 立刻补一次续租,关闭"加载→下一轮(10s)"间的过期窗口 */
+    if (!wasSelf && API.heldBySelf){ try{ const rr = await postRole("controller"); if (rr.ok) renderRole(await rr.json()); }catch(e){} }
   }catch(e){}
 }
 roleSel.addEventListener("change", async () => {
+  /* 切到监控时立即停掉续租心跳,避免在途心跳把刚释放的租约又抢回(释放/续租竞争) */
+  if (roleSel.value !== "controller") API.heldBySelf = false;
   try{
-    const r = await fetch("/api/control-role", { method:"POST",
-      headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify({ device: API.device || "", session_id: sid, session_label:"web", role: roleSel.value }) });
+    const r = await postRole(roleSel.value);
     if (r.ok) renderRole(await r.json());
   }catch(e){}
 });
@@ -327,6 +439,7 @@ API.sessionId = sid;
 })();
 setTimeout(pollRole, 400);
 setInterval(pollRole, 10000);
+setInterval(connProbe, 6000);
 
 }
 if (document.body) initDom();

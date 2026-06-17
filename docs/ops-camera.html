@@ -8,21 +8,20 @@
 <style>
 html,body{height:100%;overflow:hidden}
 /* 全屏图像舞台 */
-#stage{position:fixed;inset:0;z-index:0;cursor:grab;touch-action:none;background:var(--sky-bg)}
+#stage{position:fixed;inset:0;width:100vw;height:100vh;z-index:0;cursor:grab;touch-action:none;background:var(--sky-bg)}
 #stage.dragging{cursor:grabbing}
-.stage-empty{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:1;
-  font:var(--lab-w) 15px var(--display);letter-spacing:.3em;color:var(--quiet);text-transform:var(--lab-tt)}
+.stage-empty{position:fixed;left:calc(24px + (100vw - 354px)/2);top:calc(64px + (100vh - 234px)/2);transform:translate(-50%,-50%);z-index:1;
+  font:var(--lab-w) 16px var(--display);letter-spacing:.3em;color:var(--quiet);text-transform:var(--lab-tt)}
+.cam-offline-box{position:fixed;left:calc(24px + (100vw - 354px)/2);top:calc(64px + (100vh - 234px)/2);transform:translate(-50%,-50%);z-index:4;min-height:0}
 
-/* 左上:帧信息(羽化遮罩,无框) */
-.meta{position:fixed;left:24px;top:64px;z-index:10;max-width:46vw;
-  padding:10px 26px 16px 0;background:linear-gradient(135deg,var(--scrim) 30%,var(--scrim0))}
-.meta h1{margin:0;font:var(--lab-w) 24px var(--display);letter-spacing:.1em}
-html[data-skin="B"] .meta h1{font:500 30px var(--display);letter-spacing:.05em}
-html[data-skin="C"] .meta h1{font:300 26px var(--display)}
-.meta .cam{font:400 12px var(--mono);color:var(--muted);margin-top:2px}
-.meta .line{font:400 11.5px var(--mono);color:var(--quiet);margin-top:6px}
+/* 设备信息:右栏顶部 */
+.meta{padding:0 0 12px;border-bottom:1px solid var(--line);margin-bottom:12px}
+.meta h1{margin:0;font:var(--lab-w) 22px var(--display);letter-spacing:.1em}
+html[data-skin="B"] .meta h1{font:500 24px var(--display);letter-spacing:.05em}
+.meta .cam{font:400 16px var(--mono);color:var(--muted);margin-top:2px}
+.meta .line{font:400 12px var(--mono);color:var(--quiet);margin-top:6px}
 .badge{display:inline-flex;align-items:center;gap:7px;margin-top:9px;
-  font:var(--lab-w) 11px var(--display);letter-spacing:.18em;padding:3px 11px;
+  font:var(--lab-w) 12px var(--display);letter-spacing:.18em;padding:3px 11px;
   border:1px solid var(--line);border-radius:var(--pill);color:var(--muted);text-transform:var(--lab-tt)}
 .badge i{width:7px;height:7px;border-radius:50%;background:var(--quiet)}
 .badge.on{color:var(--good);border-color:var(--good)} .badge.on i{background:var(--good)}
@@ -36,58 +35,119 @@ html[data-skin="C"] .badge i,html[data-skin="B"] .badge i{border-radius:0}
 .rail::-webkit-scrollbar{display:none}
 html[data-skin="C"] .rail{border-left-color:var(--line)}
 .rail .ro-note{margin:0 0 10px;padding:7px 10px;border-left:3px solid var(--warn);
-  font:400 11.5px var(--body);color:var(--warn)}
+  font:400 14px var(--body);color:var(--warn)}
 .progress{height:3px;background:var(--line-dim);margin:8px 0 4px;position:relative;display:none}
 .progress.show{display:block}
 .progress i{position:absolute;left:0;top:0;bottom:0;background:var(--ac);width:0%}
 .rail .btns{display:grid;gap:8px;margin-top:8px}
 button.primary{background:var(--ac);color:var(--bg);border:1px solid var(--ac);border-radius:var(--pill);
-  font:var(--lab-w) 12.5px var(--display);letter-spacing:.16em;padding:8px 12px;cursor:pointer;text-transform:var(--lab-tt)}
+  font:var(--lab-w) 14px var(--display);letter-spacing:.16em;padding:8px 12px;cursor:pointer;text-transform:var(--lab-tt)}
 button.primary:disabled{opacity:.4;cursor:not-allowed}
 
 /* 底部:直方图与拉伸(图像之上的一条仪表带) */
-.histo{position:fixed;left:24px;right:330px;bottom:36px;z-index:10;
+.histo{position:fixed;left:24px;right:330px;bottom:54px;z-index:10;
   padding:10px 14px 8px 0;background:linear-gradient(0deg,var(--scrim) 55%,var(--scrim0))}
 .histo .hd{display:flex;align-items:center;gap:9px;flex-wrap:wrap;padding-bottom:7px}
-.histo .hd b{font:var(--lab-w) 12px var(--display);letter-spacing:.22em;color:var(--ac);text-transform:var(--lab-tt)}
-.histo .read{font:400 11px var(--mono);color:var(--quiet);margin-left:auto}
+.histo .hd b{font:var(--lab-w) 14px var(--display);letter-spacing:.22em;color:var(--ac);text-transform:var(--lab-tt)}
+.histo .read{font:400 12px var(--mono);color:var(--quiet);margin-left:auto}
 .hist-wrap{position:relative;height:74px}
+.img-stats{margin-top:18px;font:400 12px var(--mono);color:var(--quiet)}
 #hist{position:absolute;inset:0;width:100%;height:100%}
 .handle{position:absolute;top:0;bottom:0;width:14px;margin-left:-7px;cursor:ew-resize;z-index:3}
 .handle::before{content:"";position:absolute;left:6px;top:0;bottom:0;width:2px;background:var(--ac)}
 .handle.b::before{background:var(--text)}
 .handle.w::before{background:var(--text)}
 .handle::after{content:attr(data-l);position:absolute;left:50%;transform:translateX(-50%);bottom:-15px;
-  font:600 9.5px var(--mono);color:var(--muted)}
-.zoombar{position:fixed;right:330px;bottom:178px;z-index:10;display:flex;gap:6px;align-items:center}
-.zoombar .con-note{margin-right:4px}
+  font:600 12px var(--mono);color:var(--muted)}
+/* 悬停显隐工具条:鼠标在图版内时从顶部滑出 */
+.viewbar{position:fixed;left:24px;right:330px;top:64px;z-index:10;display:flex;justify-content:flex-end;align-items:center;gap:6px;
+  padding:8px 14px;background:linear-gradient(180deg,var(--scrim) 55%,var(--scrim0));
+  opacity:0;transform:translateY(-8px);transition:opacity .25s,transform .25s;pointer-events:none}
+.viewbar.show{opacity:1;transform:none;pointer-events:auto}
+.viewbar .con-note{margin-right:4px}
+@media (hover:none){.viewbar{opacity:1;transform:none;pointer-events:auto}}
 
-.statusline{position:fixed;left:24px;right:330px;bottom:0;z-index:11;padding:6px 0 8px;background:var(--bg)}
+.statusline{display:none}
 html[data-skin="C"] .histo,html[data-skin="C"] .statusline{background:linear-gradient(0deg,var(--scrim) 70%,var(--scrim0))}
+
+/* 底部曝光进度条(恢复旧版:标签 + 进度轨 + 已用/总时长,始终可见) */
+.exp-bar{position:fixed;left:0;right:0;bottom:0;z-index:12;display:flex;align-items:center;gap:14px;
+  padding:7px 22px 8px;background:linear-gradient(0deg,var(--scrim) 72%,var(--scrim0))}
+.exp-bar .lbl{font:var(--lab-w) 13px var(--display);letter-spacing:.2em;color:var(--ac);text-transform:var(--lab-tt);white-space:nowrap;min-width:4.6em;flex:none}
+html[data-skin="B"] .exp-bar .lbl{font-size:15px;letter-spacing:.08em}
+.exp-bar .op{font:var(--lab-w) 13px var(--display);letter-spacing:.06em;color:var(--ac);white-space:nowrap;flex:none}
+html[data-skin="B"] .exp-bar .op{font-size:14px}
+.exp-bar .track{position:relative;flex:1;height:3px;background:var(--line-dim);overflow:hidden}
+.exp-bar .track i{position:absolute;left:0;top:0;bottom:0;width:0%;background:var(--ac)}
+.exp-bar .track i.ind{width:32%;animation:expScan 1.15s linear infinite}
+@keyframes expScan{0%{transform:translateX(-110%)}100%{transform:translateX(380%)}}
+.exp-bar .val{font:400 13px var(--mono);color:var(--quiet);white-space:nowrap;font-variant-numeric:tabular-nums;min-width:7.5em;text-align:right}
+html[data-skin="B"] .exp-bar .val{font-size:14px}
+html[data-skin="C"] .exp-bar{background:linear-gradient(0deg,var(--scrim) 80%,var(--scrim0))}
 
 @media (max-width:980px){
   html,body{overflow:auto}
   .rail{position:static;width:auto;border-left:0;border-top:1px solid var(--ac-soft);margin-top:46vh;background:var(--bg)}
   .histo,.statusline{left:14px;right:14px}
   .histo{bottom:auto;position:relative;margin:10px 14px;background:var(--bg)}
-  .zoombar{display:none}
+  .exp-bar{position:static;margin:6px 14px;padding:8px 0;background:var(--bg)}
+  .viewbar{display:none}
   .meta{max-width:80vw}
+}
+
+/* 字号体系(与总览一致):内容16 / 注记14 / 微注12 */
+body{font-size:14px}
+html[data-skin="B"] .hrow .k{font-size:14px}
+html[data-skin="B"] .hrow .v{font-size:16px}
+html[data-skin="B"] .hgroup h3{font-size:16px}
+html[data-skin="B"] .statusline{font-size:14px}
+html[data-skin="B"] .statusline .kind{font-size:14px}
+html[data-skin="B"] .con-note{font-size:14px}
+html[data-skin="B"] button.con{font-size:14px}
+
+/* 入场编排修订:本页右栏/直方图带/状态行均为异步填充(loadImage + loadState),
+   若沿用主题层"加载即按时间轴淡入",慢网时空容器会先于内容浮现、顺序错乱。
+   做法:先把所有 .seq 暂停在隐藏起始态,等首次数据就绪(两路 load 结束)再统一放行,
+   届时各段已填好内容,按 d1/d2/d3 自上而下依次浮现。reduce 用户不受影响(本块在 no-preference 内)。 */
+@media (prefers-reduced-motion:no-preference){
+  .seq{animation-play-state:paused}
+  body.ready .seq{animation-play-state:running}
+}
+/* 右栏:不整块淡入,而是分组标题与数据行逐条依次浮现。
+   容器自身用一个近乎即时的 opacity 切换占住它在级联中的档位(.28s),不做时长淡入 ——
+   否则父级 opacity 渐变会"罩住"子行,行级错峰就看不出来了。
+   行的浮现只在首次揭幕(.rail.reveal)期间生效,其后轮询刷新不重放(见脚本)。 */
+@media (prefers-reduced-motion:no-preference){
+  .rail{opacity:0}
+  body.ready .rail{animation:camFrameIn .01s linear .28s forwards}
+  @keyframes camFrameIn{to{opacity:1}}
+  body.ready .rail.reveal .hgroup h3,
+  body.ready .rail.reveal .hrow,
+  body.ready .rail.reveal .ro-note{
+    opacity:0;transform:translateY(6px);
+    animation:opsSeq .46s cubic-bezier(.2,.7,.3,1) both;
+    animation-delay:calc(.3s + var(--ri,0) * .07s);
+  }
 }
 </style>
 </head>
 <body>
 <canvas id="stage"></canvas>
 <div class="stage-empty" id="stage-empty">正在取回最近一帧…</div>
-
-<section class="meta seq">
-  <h1 id="dev-name">相机</h1>
-  <div class="cam" id="cam-name">--</div>
-  <div class="line num" id="img-line">--</div>
-  <span class="badge" id="state-badge"><i></i><span id="state-text">检测中</span></span>
-  <span class="badge" id="demo-badge" style="display:none"><i></i><span>演示曝光</span></span>
-</section>
+<div class="ops-disconnected cam-offline-box" id="cam-offline" style="display:none">
+  <div class="ring"></div>
+  <h4>盒子未连接</h4>
+  <div class="sub" id="cam-offline-sub">--</div>
+  <div class="note" id="cam-offline-note">正在重试连接…</div>
+</div>
 
 <aside class="rail seq d1">
+  <section class="meta">
+    <h1 id="dev-name">相机</h1>
+    <div class="cam" id="cam-name">--</div>
+    <div class="line num" id="img-line">--</div>
+    <span class="badge" id="state-badge"><i></i><span id="state-text">检测中</span></span>
+  </section>
   <div class="ro-note" id="ro-note">当前为监控视角 —— 参数只读;切换为主控后可写入。</div>
   <div class="ro-note" id="access-note" style="display:none">当前为只读入口,无法拍摄。<a id="access-note-link" href="#" style="color:var(--ac)">点此打开可操作入口 →</a></div>
 
@@ -98,7 +158,6 @@ html[data-skin="C"] .histo,html[data-skin="C"] .statusline{background:linear-gra
     <div class="progress" id="cap-prog"><i></i></div>
     <div class="btns">
       <button class="primary" id="btn-shoot" type="button" disabled>拍摄一张</button>
-      <button class="con" id="btn-demo" type="button">演示拍摄(本地模拟)</button>
       <button class="con" id="btn-refresh" type="button">拉取最新图像</button>
     </div>
   </div>
@@ -110,7 +169,6 @@ html[data-skin="C"] .histo,html[data-skin="C"] .statusline{background:linear-gra
     <div class="btns" style="margin-top:6px">
       <button class="con" id="apply-exposure-btn" type="button" disabled>写入曝光参数</button>
     </div>
-    <div id="op-msg" class="con-note" style="display:block;margin-top:6px"></div>
   </div>
 
   <div class="hgroup"><h3><span class="rn">Ⅲ</span>传感器</h3>
@@ -127,7 +185,7 @@ html[data-skin="C"] .histo,html[data-skin="C"] .statusline{background:linear-gra
   </div>
 </aside>
 
-<div class="zoombar seq d2">
+<div class="viewbar" id="viewbar">
   <span class="con-note" id="zoom-read">--</span>
   <button class="con" id="z-fit" type="button">适配</button>
   <button class="con" id="z-100" type="button">100%</button>
@@ -137,7 +195,7 @@ html[data-skin="C"] .histo,html[data-skin="C"] .statusline{background:linear-gra
 
 <section class="histo seq d2">
   <div class="hd">
-    <b>直方图拉伸 · 本地实时</b>
+    <b>直方图拉伸</b>
     <button class="con on" id="s-auto" type="button">自动</button>
     <button class="con" id="s-strong" type="button">强拉伸</button>
     <button class="con" id="s-linear" type="button">线性</button>
@@ -149,7 +207,15 @@ html[data-skin="C"] .histo,html[data-skin="C"] .statusline{background:linear-gra
     <div class="handle m" id="h-m" data-l="中调"></div>
     <div class="handle w" id="h-w" data-l="白场"></div>
   </div>
+  <div class="img-stats num" id="img-stats">--</div>
 </section>
+
+<div class="exp-bar seq d3" id="exp-bar" aria-label="曝光进度">
+  <span class="lbl" id="exp-label">待机</span>
+  <span class="op" id="op-status"></span>
+  <div class="track"><i id="exp-fill"></i></div>
+  <span class="val num" id="exp-val">--</span>
+</div>
 
 <footer class="statusline seq d3">
   <span class="kind" id="status-kind" style="color:var(--good)">[—]</span>
@@ -162,10 +228,28 @@ const $=id=>document.getElementById(id);
 const OPS=window.OPS;
 const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const REDUCED=matchMedia("(prefers-reduced-motion: reduce)").matches;
+let revealed=false;
+/* 首次数据就绪后统一放行入场动画(自上而下),并让右栏分组/数据行逐条浮现。
+   仅首次揭幕加 .reveal,级联跑完即移除,避免 3s 轮询刷新重放。 */
+function revealSeq(){
+  if(revealed)return;revealed=true;
+  requestAnimationFrame(()=>{
+    document.body.classList.add("ready");
+    const rail=document.querySelector(".rail");
+    if(rail){
+      /* 为逐条浮现标注顺序索引(仅在首次揭幕 .rail.reveal 期间被 CSS 使用) */
+      const items=rail.querySelectorAll(".ro-note, .hgroup h3, .hrow");
+      items.forEach((el,i)=>el.style.setProperty("--ri",i));
+      rail.classList.add("reveal");
+      setTimeout(()=>rail.classList.remove("reveal"),300+items.length*70+800);
+    }
+  });
+}
 
 /* ───── 图像核心:原始像素 + LUT 拉伸 + 视口变换 ───── */
 const stage=$("stage"),sctx=stage.getContext("2d");
-let srcW=0,srcH=0,srcGray=null;      // 原始灰度 Uint8Array
+let srcW=0,srcH=0,srcGray=null;      // 8 位灰度(PNG 后备)
+let src16=null,hist16=null;          // 16 位原始帧 + 全分辨率直方图
 let hist=new Float64Array(256);
 let work=document.createElement("canvas"),wctx=work.getContext("2d");
 let stf={b:0,m:.5,w:1};
@@ -178,42 +262,93 @@ function mtfInvParam(x0,y0){ // 求 m,使 MTF(x0,m)=y0
   return Math.min(.99,Math.max(.01,m));
 }
 function applyLUT(){
-  if(!srcGray)return;
-  const lut=new Uint8ClampedArray(256);
+  if(!src16&&!srcGray)return;
   const {b,m,w}=stf,span=Math.max(1e-4,w-b);
-  for(let i=0;i<256;i++){
-    const x=(i/255-b)/span;
-    lut[i]=Math.round(mtf(x,m)*255);
-  }
   const id=wctx.createImageData(srcW,srcH),px=id.data;
-  for(let i=0,j=0;i<srcGray.length;i++,j+=4){
-    const v=lut[srcGray[i]];
-    px[j]=px[j+1]=px[j+2]=v;px[j+3]=255;
+  if(src16){          /* 16 位域拉伸 */
+    const lut=new Uint8ClampedArray(65536);
+    for(let i=0;i<65536;i++){const x=(i/65535-b)/span;lut[i]=Math.round(mtf(x,m)*255);}
+    for(let i=0,j=0;i<src16.length;i++,j+=4){const v=lut[src16[i]];px[j]=px[j+1]=px[j+2]=v;px[j+3]=255;}
+  }else{              /* 8 位 PNG 后备 */
+    const lut=new Uint8ClampedArray(256);
+    for(let i=0;i<256;i++){const x=(i/255-b)/span;lut[i]=Math.round(mtf(x,m)*255);}
+    for(let i=0,j=0;i<srcGray.length;i++,j+=4){const v=lut[srcGray[i]];px[j]=px[j+1]=px[j+2]=v;px[j+3]=255;}
   }
   wctx.putImageData(id,0,0);
   drawStage();drawHist();
   $("stf-read").textContent=`黑 ${stf.b.toFixed(3)} · 中 ${stf.m.toFixed(3)} · 白 ${stf.w.toFixed(3)}`;
   placeHandles();
 }
+/* 图像视口:顶栏之下、右栏之左、直方图带之上(窄屏退化为全宽) */
+function VP(){
+  const wide=innerWidth>980;
+  const x=24,y=64;
+  const w=innerWidth-x-(wide?330:24);
+  const h=innerHeight-y-(wide?170:Math.round(innerHeight*.5));
+  return {x,y,w:Math.max(40,w),h:Math.max(40,h)};
+}
+function clampView(){
+  const vp=VP(),iw=srcW*view.z,ih=srcH*view.z;
+  if(iw<=vp.w)view.x=vp.x+(vp.w-iw)/2;
+  else view.x=Math.min(vp.x,Math.max(vp.x+vp.w-iw,view.x));
+  if(ih<=vp.h)view.y=vp.y+(vp.h-ih)/2;
+  else view.y=Math.min(vp.y,Math.max(vp.y+vp.h-ih,view.y));
+}
 function drawStage(){
   const w=innerWidth,h=innerHeight,dpr=devicePixelRatio||1;
   if(stage.width!==w*dpr||stage.height!==h*dpr){stage.width=w*dpr;stage.height=h*dpr;}
   sctx.setTransform(dpr,0,0,dpr,0,0);
   sctx.fillStyle=css("--sky-bg");sctx.fillRect(0,0,w,h);
-  if(!srcGray)return;
+  if(!src16&&!srcGray)return;
+  const vp=VP();
   if(view.fit){
-    view.z=Math.min(w/srcW,h/srcH);
-    view.x=(w-srcW*view.z)/2;view.y=(h-srcH*view.z)/2;
+    view.z=Math.min(vp.w/srcW,vp.h/srcH);
+    view.x=vp.x+(vp.w-srcW*view.z)/2;view.y=vp.y+(vp.h-srcH*view.z)/2;
   }
+  clampView();
+  /* 图版边框:发丝外框 + 四角刻线,标明图像活动范围 */
+  sctx.strokeStyle=css("--line");sctx.lineWidth=1;
+  sctx.strokeRect(vp.x+.5,vp.y+.5,vp.w-1,vp.h-1);
+  sctx.strokeStyle=css("--ac-soft");
+  const T=14;
+  for(const [cx,cy,dx,dy] of [[vp.x,vp.y,1,1],[vp.x+vp.w,vp.y,-1,1],[vp.x,vp.y+vp.h,1,-1],[vp.x+vp.w,vp.y+vp.h,-1,-1]]){
+    sctx.beginPath();sctx.moveTo(cx+dx*T,cy);sctx.lineTo(cx,cy);sctx.lineTo(cx,cy+dy*T);sctx.stroke();
+  }
+  sctx.save();
+  sctx.beginPath();sctx.rect(vp.x,vp.y,vp.w,vp.h);sctx.clip();
   sctx.imageSmoothingEnabled=view.z<1;
   sctx.globalAlpha=frameAlpha;
   sctx.drawImage(work,view.x,view.y,srcW*view.z,srcH*view.z);
   sctx.globalAlpha=1;
+  sctx.restore();
   $("zoom-read").textContent=Math.round(view.z*100)+"%";
+}
+function updateStats(){
+  const el=$("img-stats");if(!el)return;
+  if(src16&&hist16){
+    const n=src16.length;let mn=-1,mx=0,sum=0;
+    for(let v=0;v<65536;v++){const c=hist16[v];if(!c)continue;if(mn<0)mn=v;mx=v;sum+=v*c;}
+    let acc=0,med=0;for(let v=0;v<65536;v++){acc+=hist16[v];if(acc>=n/2){med=v;break;}}
+    el.textContent=`尺寸 ${srcW} × ${srcH} · 16-bit · 最小 ${Math.max(0,mn)} · 最大 ${mx} · 均值 ${(sum/n).toFixed(1)} · 中位 ${med}`;
+    return;
+  }
+  if(!srcGray){el.textContent="--";return;}
+  let mn=255,mx=0,sum=0;const h=new Uint32Array(256);
+  for(let i=0;i<srcGray.length;i++){const v=srcGray[i];if(v<mn)mn=v;if(v>mx)mx=v;sum+=v;h[v]++;}
+  const n=srcGray.length;let acc=0,med=0;
+  for(let v=0;v<256;v++){acc+=h[v];if(acc>=n/2){med=v;break;}}
+  el.textContent=`尺寸 ${srcW} × ${srcH} · 8-bit 预览 · 最小 ${mn} · 最大 ${mx} · 均值 ${(sum/n).toFixed(1)} · 中位 ${med}`;
 }
 function buildHist(){
   hist.fill(0);
-  for(let i=0;i<srcGray.length;i+=2)hist[srcGray[i]]++; // 隔点采样足够
+  if(src16){
+    hist16=new Uint32Array(65536);
+    for(let i=0;i<src16.length;i++)hist16[src16[i]]++;
+    for(let v=0;v<65536;v++)hist[v>>8]+=hist16[v];   /* 显示用 256 桶投影 */
+  }else{
+    hist16=null;
+    for(let i=0;i<srcGray.length;i+=2)hist[srcGray[i]]++; // 隔点采样足够
+  }
 }
 function drawHist(){
   const cv=$("hist"),ctx=cv.getContext("2d");
@@ -221,7 +356,7 @@ function drawHist(){
   if(cv.width!==w*dpr||cv.height!==h*dpr){cv.width=w*dpr;cv.height=h*dpr;}
   ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
   ctx.strokeStyle=css("--line");ctx.strokeRect(.5,.5,w-1,h-1);
-  if(!srcGray)return;
+  if(!src16&&!srcGray)return;
   let mx=0;for(let i=1;i<255;i++)mx=Math.max(mx,hist[i]);
   if(!mx)return;
   ctx.fillStyle=css("--muted");ctx.globalAlpha=.85;
@@ -245,13 +380,12 @@ function placeHandles(){
 
 /* 拉伸预设(基于直方图统计) */
 function stats(){
-  let n=0;for(let i=0;i<256;i++)n+=hist[i];
-  let acc=0,med=0;for(let i=0;i<256;i++){acc+=hist[i];if(acc>=n/2){med=i/255;break;}}
-  let mad=0,acc2=0;for(let i=0;i<256;i++){acc2+=hist[i];if(acc2>=n/2){ /* 近似 MAD:用分位差 */ break;}}
-  // 用 1% / 99.7% 分位
+  const H=hist16||hist,N=H.length,scale=N-1;   /* 16 位时以 65536 桶取分位,黑场精度到 1 ADU */
+  let n=0;for(let i=0;i<N;i++)n+=H[i];
+  let acc=0,med=0;for(let i=0;i<N;i++){acc+=H[i];if(acc>=n/2){med=i/scale;break;}}
   let lo=0,hi=1,a=0;
-  for(let i=0;i<256;i++){a+=hist[i];if(a>=n*.01){lo=i/255;break;}}
-  a=0;for(let i=0;i<256;i++){a+=hist[i];if(a>=n*.997){hi=i/255;break;}}
+  for(let i=0;i<N;i++){a+=H[i];if(a>=n*.01){lo=i/scale;break;}}
+  a=0;for(let i=0;i<N;i++){a+=H[i];if(a>=n*.997){hi=i/scale;break;}}
   return {med,lo,hi};
 }
 function preset(kind){
@@ -307,9 +441,16 @@ $("s-linear").addEventListener("click",()=>preset("linear"));
     view.y=e.clientY-(e.clientY-view.y)*(nz/view.z);
     view.z=nz;view.fit=false;drawStage();},{passive:false});
   stage.addEventListener("dblclick",()=>{view.fit=true;drawStage();});
+  const vb=$("viewbar");
+  document.addEventListener("mousemove",e=>{
+    const vp=VP();
+    const inside=e.clientX>=vp.x&&e.clientX<=vp.x+vp.w&&e.clientY>=vp.y&&e.clientY<=vp.y+vp.h+40;
+    vb.classList.toggle("show",inside);
+  });
+  document.documentElement.addEventListener("mouseleave",()=>vb.classList.remove("show"));
   $("z-fit").addEventListener("click",()=>{view.fit=true;drawStage();});
   $("z-100").addEventListener("click",()=>{view.fit=false;view.z=1;
-    view.x=(innerWidth-srcW)/2;view.y=(innerHeight-srcH)/2;drawStage();});
+    const vp=VP();view.x=vp.x+(vp.w-srcW)/2;view.y=vp.y+(vp.h-srcH)/2;drawStage();});
   $("z-in").addEventListener("click",()=>{view.fit=false;view.z=Math.min(8,view.z*1.25);drawStage();});
   $("z-out").addEventListener("click",()=>{view.fit=false;view.z=Math.max(.05,view.z/1.25);drawStage();});
   addEventListener("resize",drawStage);
@@ -329,45 +470,92 @@ function frameIn(){
 /* ───── 数据拉取 ───── */
 let camState=null,imgMeta=null;
 function setBadge(text,cls){const b=$("state-badge");b.className="badge "+(cls||"");$("state-text").textContent=text;}
+async function loadRaw16(){
+  const im=(imgMeta&&imgMeta.image)||{};
+  if(!imgMeta||!imgMeta.raw_url||!im.width||!im.height)return false;
+  const r=await fetch(`${imgMeta.raw_url}&_=${Date.now()}`,{cache:"no-store"});
+  if(!r.ok)return false;
+  const buf=await r.arrayBuffer();
+  const n=im.width*im.height;
+  if(buf.byteLength<n*2)return false;
+  let a=new Uint16Array(buf,0,n);
+  if((im.byte_order||"little")==="big"){const b=new Uint16Array(n);for(let i=0;i<n;i++){const v=a[i];b[i]=((v&255)<<8)|(v>>8);}a=b;}
+  src16=a;srcGray=null;
+  srcW=im.width;srcH=im.height;
+  work.width=srcW;work.height=srcH;
+  return true;
+}
 async function loadImage(force){
+  loadingImage=true;
   try{
     {const p=new URLSearchParams();if(OPS.device)p.set("device",OPS.device);if(force)p.set("refresh","1");
-    imgMeta=await OPS.fetchJSON("/api/current-image?"+p.toString());}
+    /* 全幅图取回+降采样本就要数秒,默认 6s 会被切断导致"图回不来";放宽到 30s */
+    imgMeta=await OPS.fetchJSON("/api/current-image?"+p.toString(),{timeout:30000});}
     const im=imgMeta.image||{};
-    $("img-line").textContent=`${im.width}×${im.height} · Bin${im.bin} · 曝光 ${im.exposure_ms/1000}s · 帧 #${im.image_id}`;
+    const _expS=im.exposure_ms!=null?(im.exposure_ms/1000):null;
+    $("img-line").textContent=`${im.width}×${im.height} · Bin${im.bin??"--"} · 曝光 ${_expS!=null?_expS+"s":"--"} · 帧 #${im.image_id??"--"}`;
     $("r-imgid").textContent="#"+(im.image_id??"--");
     $("r-osize").textContent=im.original_width?`${im.original_width} × ${im.original_height}`:"--";
     $("r-age").textContent=OPS.fmtAgo(imgMeta.age_seconds);
+    /* 同一帧(image_id 未变)已在显示 → 只刷新元信息,不重载大图(自动跟随时避免重复渲染同帧)*/
+    if(im.image_id!=null&&im.image_id===lastShownImgId){return;}
+    lastShownImgId=im.image_id;
+    /* 16 位原始帧优先:交互拉伸要 16 位数据(Uint16Array,显示仍 8 位)。后端已 gzip(~116MB→~46MB),
+       浏览器走 Content-Encoding 透明解压,loadRaw16 不用改。取/解失败再退 8 位 PNG。 */
+    let ok16=false;
+    try{ok16=await loadRaw16();}catch(e){}
+    if(ok16){buildHist();updateStats();$("stage-empty").style.display="none";preset("auto");frameIn();return;}
     const img=new Image();
     img.onload=()=>{
+      src16=null;hist16=null;
       srcW=img.naturalWidth;srcH=img.naturalHeight;
       work.width=srcW;work.height=srcH;
       wctx.drawImage(img,0,0);
       const d=wctx.getImageData(0,0,srcW,srcH).data;
       srcGray=new Uint8Array(srcW*srcH);
       for(let i=0,j=0;i<srcGray.length;i++,j+=4)srcGray[i]=d[j];
-      buildHist();
+      buildHist();updateStats();
       $("stage-empty").style.display="none";
       preset("auto");frameIn();
     };
     img.onerror=()=>{$("stage-empty").textContent="帧文件取回失败";};
     img.src=imgMeta.image_url;
   }catch(e){$("stage-empty").textContent="未取得当前帧:"+(e.message||"接口不可达");}
+  finally{loadingImage=false;}
+}
+function setCamOffline(on,note){
+  const box=$("cam-offline"),cv=$("stage"),c=OPS.conn||{};
+  if(on){
+    const nm=(camState&&camState.device&&camState.device.name)||c.name||OPS.device||"";
+    const ip=(camState&&camState.device&&camState.device.ip)||c.ip||"";
+    $("cam-offline-sub").textContent=[nm,ip].filter(Boolean).join(" · ")||"--";
+    $("cam-offline-note").textContent=note||("正在每 3 秒重试连接…"+(c.lastSeenMs?(" · 最后在线 "+OPS.fmtAgo((Date.now()-c.lastSeenMs)/1000)):""));
+    box.style.display="flex";$("stage-empty").style.display="none";if(cv)cv.style.opacity=".12";
+  }else{box.style.display="none";if(cv)cv.style.opacity="";}
 }
 async function loadState(){
+  let offline=false;
   try{
     /* 接入修订:补传 session_id,否则 lease.held_by_self 恒为 false,主控文案与顶栏矛盾 */
     camState=await OPS.fetchJSON("/api/camera-state"+(OPS.device?`?device=${encodeURIComponent(OPS.device)}&session_id=${encodeURIComponent(OPS.sessionId||"")}`:""));
     const cam=camState.camera||{},app=camState.app||{},ctl=camState.controls||{},exp=camState.exposure||{};
+    /* 离线判定统一走 OPS.deriveOnline(看 errors 里 get_app_state 心跳是否超时),
+       不能用字段有无——camera_cache 会保留上次在线的相机型号/曝光旧值,会误报"在线" */
+    offline=OPS.deriveOnline(camState)===false;
+    OPS.reportConn(!offline,{ip:camState.device&&camState.device.ip,name:camState.device&&camState.device.name});
+    offline=OPS.conn.online===false;   /* 显示一律用迟滞后的全站连接态,避免单次心跳超时闪"未连接" */
     $("dev-name").textContent=(camState.device&&camState.device.name)||"相机";
     $("cam-name").textContent=cam.name||"--";
-    const working=!!app.capture_working;
-    setBadge(working?"采集中":"在线 · "+(app.capture_state||"idle"),working?"warn":"on");
+    /* 采集状态一律以 capture-progress(cpWorking,持续 1.5s 轮询、新鲜)为准。
+       camera-state.capture_working 经 camera_cache 缓存,曝光期间会滞后约一个曝光周期
+       (实测约 20s),既不驱动底部进度条也不单独决定徽标/指示,否则与 cp 打架、反复跳变。 */
+    const live=cpWorking===true||(cpWorking===null&&!!app.capture_working);
+    setBadge(offline?"盒子未连接":(live?"采集中":"在线 · "+(app.capture_state||"idle")),offline?"":(live?"warn":"on"));
     $("r-state").textContent=app.capture_state||"--";
     $("r-mode").textContent=app.exposure_mode||"--";
     $("r-frame").textContent=app.capture_progress!=null?Math.round(app.capture_progress*100)+"%":"--";
-    const pr=$("cap-prog");pr.classList.toggle("show",working);
-    if(working)pr.querySelector("i").style.width=((app.capture_progress||0)*100)+"%";
+    const pr=$("cap-prog");pr.classList.toggle("show",live);
+    if(live)pr.querySelector("i").style.width=((app.capture_progress||0)*100)+"%";
     if(document.activeElement!==$("exposure-input")&&exp.seconds!=null)$("exposure-input").value=exp.seconds;
     {const bs=$("bin-select");
      if(!bs.options.length)((cam.bins&&cam.bins.length)?cam.bins:[1,2,3,4]).forEach(b=>{const o=document.createElement("option");o.value=o.textContent=b;bs.appendChild(o);});
@@ -377,45 +565,61 @@ async function loadState(){
     $("r-cool").textContent=ctl.cool_power?ctl.cool_power.display:"--";
     $("r-chip").textContent=cam.chip_size?cam.chip_size.join(" × "):"--";
     $("r-px").textContent=cam.pixel_size_um?cam.pixel_size_um+" µm":"--";
-    $("status-kind").textContent="[OK]";$("status-kind").style.color="var(--good)";
-    $("status-text").textContent=`相机在线 · ${cam.name||""} · ${camState.lease&&camState.lease.held_by_self?"主控会话":"监控视角(只读)"}`;
+    if(offline){$("status-kind").textContent="[OFF]";$("status-kind").style.color="var(--bad)";
+      $("status-text").textContent=`盒子未连接 · 无法访问 ${(camState.device&&camState.device.ip)||""}(检查盒子电源/网络)`;}
+    else{$("status-kind").textContent="[OK]";$("status-kind").style.color="var(--good)";
+      $("status-text").textContent=`相机在线 · ${cam.name||""} · ${camState.lease&&camState.lease.held_by_self?"主控会话":"监控视角(只读)"}`;}
     $("snapshot").textContent=camState.snapshot_at||"--";
+    setCamOffline(offline);
   }catch(e){
-    setBadge("无响应","");
-    $("status-kind").textContent="[ERR]";$("status-kind").style.color="var(--bad)";
-    $("status-text").textContent="相机状态加载失败:"+(e.message||"接口不可达");
+    OPS.reportConn(false,{name:OPS.device});
+    offline=OPS.conn.online===false;   /* 走迟滞:grace 内的瞬时失败不翻离线 */
+    if(offline){
+      setBadge("盒子未连接","");
+      $("status-kind").textContent="[OFF]";$("status-kind").style.color="var(--bad)";
+      $("status-text").textContent="盒子未连接 · "+(e.message||"接口不可达");
+      setCamOffline(true,"接口不可达,正在重试…");
+    }
+    /* else: grace 窗口内的瞬时失败 — 维持上次画面,不闪"未连接" */
+  }finally{
+    const gate=OPS.actionsAllowed();
+    const self=OPS.heldBySelf&&gate;
+    $("btn-shoot").disabled=!self||offline;
+    $("apply-exposure-btn").disabled=!self||offline;
+    $("ro-note").style.display=(self||!gate)?"none":"";
+    $("access-note").style.display=gate?"none":"";
+    if(!gate)$("access-note-link").href=OPS.actionEntry("camera");
+    /* 首次状态就绪(成功或失败、且门禁文案已就位)后统一放行入场动画 */
+    revealSeq();
   }
-  const gate=OPS.actionsAllowed();
-  const self=OPS.heldBySelf&&gate;
-  $("btn-shoot").disabled=!self;
-  $("apply-exposure-btn").disabled=!self;
-  $("ro-note").style.display=(self||!gate)?"none":"";
-  $("access-note").style.display=gate?"none":"";
-  if(!gate)$("access-note-link").href=OPS.actionEntry("camera");
 }
 OPS.onControl(()=>loadState());document.addEventListener("ops:access",loadState);
 
 $("btn-refresh").addEventListener("click",()=>loadImage(true));
 function newOpId(){return (window.crypto&&crypto.randomUUID)?crypto.randomUUID():`${Date.now()}-${Math.random().toString(16).slice(2)}`;}
 async function postCameraAction(action,extra){
-  const operation_id=newOpId();
+  const operation_id=newOpId();$("op-status").title="";
   const body={device:OPS.device,session_id:OPS.sessionId,operation_id,action,...(extra||{})};
   const opTimer=setInterval(async()=>{
     try{const q=new URLSearchParams({device:OPS.device,session_id:OPS.sessionId,operation_id});
       const p=await OPS.fetchJSON(`/api/camera-operation?${q}`);
       const op=p&&p.operation;if(!op)return;
-      $("op-msg").textContent=`${op.label||"执行中"} ${op.step||0}/${op.total||1}`;
+      $("op-status").textContent=`${op.label||"执行中"} ${op.step||0}/${op.total||1}`;
       if(op.state==="done"||op.state==="error")clearInterval(opTimer);
     }catch(e){}},500);
   try{
     const payload=await OPS.fetchJSON("/api/camera-action",{method:"POST",
       headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-    $("op-msg").textContent=action==="shutter"?"已发送快门":"参数已写入";
+    $("op-status").textContent=action==="shutter"?"已发送快门":"参数已写入";$("op-status").title="";
     return payload;
   }catch(err){
-    $("op-msg").textContent="操作失败:"+(err.message||err);
+    const raw=(err&&(err.message||String(err)))||"未知错误";
+    const brief=/timed?\s*out|timeout|无响应|unreachable|ECONN|Failed to fetch|NetworkError|refus/i.test(raw)?"盒子无响应"
+      :/16-?\s?bit/i.test(raw)?"非16bit,请在ASIAIR重开相机"
+      :raw.length>22?raw.slice(0,22)+"…":raw;
+    $("op-status").textContent="失败:"+brief;$("op-status").title=raw;
     $("status-kind").textContent="[ERR]";$("status-kind").style.color="var(--bad)";
-    $("status-text").textContent=err.message||String(err);
+    $("status-text").textContent=raw;
     throw err;
   }finally{setTimeout(()=>clearInterval(opTimer),4000);}
 }
@@ -424,11 +628,12 @@ async function trackCapture(){
   for(let i=0;i<240;i++){
     await new Promise(r=>setTimeout(r,500));
     try{const cp=await OPS.fetchJSON(`/api/capture-progress?device=${encodeURIComponent(OPS.device)}`);
+      applyCP(cp);
       if(cp&&cp.progress!=null)pr.querySelector("i").style.width=(cp.progress*100)+"%";
       if(cp&&cp.is_working===false)break;
     }catch(e){break;}
   }
-  pr.classList.remove("show");
+  pr.classList.remove("show");loadState();
 }
 $("btn-shoot").addEventListener("click",async()=>{
   try{
@@ -445,27 +650,75 @@ $("apply-exposure-btn").addEventListener("click",async()=>{
   }catch(e){}
 });
 
-/* 演示拍摄:纯本地模拟一次曝光进度,完成后重取当前帧 */
-$("btn-demo").addEventListener("click",()=>{
-  const secs=(camState&&camState.exposure&&camState.exposure.seconds)||5;
-  const pr=$("cap-prog");pr.classList.add("show");
-  $("demo-badge").style.display="";setBadge("演示曝光中","warn");
-  const t0=performance.now(),dur=Math.min(8,secs)*1000;
-  (function step(t){
-    const p=Math.min(1,(t-t0)/dur);
-    pr.querySelector("i").style.width=(p*100)+"%";
-    $("r-frame").textContent=Math.round(p*100)+"%";
-    if(p<1)requestAnimationFrame(step);
-    else{
-      pr.classList.remove("show");$("demo-badge").style.display="none";
-      setBadge("在线 · idle","on");
-      loadImage();   /* 重新取帧并播放入场动画 */
-    }
-  })(t0);
-});
+/* ── 底部曝光进度条引擎 ──
+   权威进度取自 /api/capture-progress(锚定 lapse_ms/total_ms),两次轮询之间按真实时间本地插值,
+   逐帧重绘以平滑推进;相机状态(3s)只用于在 cp 尚未发声时初始化轨道。星图册配色:金色,无霓虹。 */
+let cpWorking=null,cpDownload=false,expTrack=null,lastCpAt=0,loadingImage=false;
+/* 自动跟随最新帧:盒子(含 ASIAIR app 的计划序列)每拍完一帧,自动取回并显示 */
+let autoFollow=true,lastShownImgId=null,cpPrevLapse=0,autoFetchTimer=null;
+function scheduleAutoFetch(delay){
+  if(!autoFollow||(OPS.hidden&&OPS.hidden()))return;
+  clearTimeout(autoFetchTimer);
+  autoFetchTimer=setTimeout(function go(){
+    if(OPS.hidden())return;
+    if(loadingImage){autoFetchTimer=setTimeout(go,2000);return;}  /* 取图在途:稍后重试,避免并发同帧 */
+    loadImage(true);
+  },delay||2500);
+}
+function applyCP(cp){
+  if(!cp)return;
+  lastCpAt=performance.now();
+  const wasWorking=cpWorking;
+  cpWorking=!!cp.is_working;
+  cpDownload=cpWorking&&cp.state==="download";
+  /* 帧完成检测 → 自动取回:① 采集由工作转停止;② 连拍中曝光计时回绕(lapse 大幅下降=新一帧开始=上帧已保存)*/
+  const lapse=Number(cp.lapse_ms||0);
+  if(wasWorking===true&&!cpWorking)scheduleAutoFetch(2500);
+  else if(cpWorking&&cpPrevLapse>5000&&lapse<cpPrevLapse-3000)scheduleAutoFetch(2500);
+  cpPrevLapse=cpWorking?lapse:0;
+  if(cpWorking&&Number(cp.total_ms)>0){
+    const total=Number(cp.total_ms),cand=performance.now()-Number(cp.lapse_ms||0);
+    /* 单次曝光内起点只向前(min),避免每秒按网络延迟回跳;换帧(total 变)或无轨道时才硬锚定 */
+    if(expTrack&&expTrack.durationMs===total)expTrack.startedAt=Math.min(expTrack.startedAt,cand);
+    else expTrack={startedAt:cand,durationMs:total};
+    expTrack.capState=String(cp.state||"");
+  }
+  else if(!cpWorking)expTrack=null;
+}
+async function pollCaptureProgress(){
+  if(!OPS.device)return;
+  try{const p=await OPS.fetchJSON(`/api/capture-progress?device=${encodeURIComponent(OPS.device)}`);if(p&&p.ok)applyCP(p);}
+  catch(e){/* 瞬时失败:保留上次值,曝光中途不回跳待机 */}
+}
+function renderExpBar(){
+  const fill=$("exp-fill"),label=$("exp-label"),val=$("exp-val");if(!fill)return;
+  label.style.color="";fill.style.transform="";fill.style.width="";
+  if(cpDownload){fill.classList.add("ind");label.textContent="下载中";label.style.color="var(--good)";val.textContent="写盘";return;}
+  const t=expTrack;
+  /* cp 静默超 20s(接口持续失效)则不再信任旧轨道,回落待机,避免卡在曝光/读出中 */
+  const stale=lastCpAt&&(performance.now()-lastCpAt>20000);
+  if(!t||stale){
+    /* 盒子离线时底部条与离线界面一致显示"未连接",不报"待机" */
+    if(OPS.conn&&OPS.conn.online===false){fill.classList.remove("ind");fill.style.width="0%";label.textContent="未连接";label.style.color="var(--bad)";val.textContent="--";return;}
+    /* 采集已结束但图像还在取回/出图 → 显示"出图中",不要过早回到待机 */
+    if(loadingImage){fill.classList.add("ind");label.textContent="出图中";label.style.color="var(--ac)";val.textContent="载入";return;}
+    fill.classList.remove("ind");fill.style.width="0%";label.textContent="待机";val.textContent="--";return;
+  }
+  if(t.capState==="saving"){fill.classList.add("ind");label.textContent="保存中";label.style.color="var(--warn)";val.textContent="写盘";return;}
+  const dur=Number(t.durationMs||0);
+  if(dur<=0){fill.classList.add("ind");label.textContent="曝光中";label.style.color="var(--ac)";val.textContent="进行中";return;}
+  const el=Math.max(0,performance.now()-t.startedAt),ratio=el/dur;
+  fill.classList.remove("ind");
+  if(ratio>=1){fill.style.width="100%";label.textContent="读出中";label.style.color="var(--warn)";val.textContent=(dur/1000).toFixed(1)+"s";}
+  else{fill.style.width=(ratio*100).toFixed(1)+"%";label.textContent="曝光中";label.style.color="var(--ac)";val.textContent=(el/1000).toFixed(1)+" / "+(dur/1000).toFixed(1)+"s";}
+}
+(function progLoop(){renderExpBar();requestAnimationFrame(progLoop);})();
+/* 进度条完全由 capture-progress 驱动:可见时持续 1.5s 轮询(接口轻量且新鲜),
+   不再依赖滞后的 camera-state 判断是否曝光,避免漏检与跳变 */
+setInterval(()=>{if(!OPS.hidden())pollCaptureProgress();},1500);
 
 OPS.onSkin(()=>{drawStage();drawHist();});
-loadImage();
+loadImage();scheduleAutoFetch(1500);   /* 先显示缓存帧,再自动取回当前最新帧 */
 loadState();setInterval(()=>{if(!OPS.hidden())loadState();},3000);
 </script>
 </body>

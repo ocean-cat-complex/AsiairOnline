@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ASIAIR OPS · 素材库维护</title>
+<script src="ops-theme.js"></script>
+<style>
+#bg{position:fixed;inset:0;width:100vw;height:100vh;z-index:0}
+.wrap{position:relative;z-index:2;max-width:1460px;margin:0 auto;padding:76px 26px 26px;min-height:100vh;
+  display:flex;flex-direction:column}
+.wrap{--ad-major:16px;--ad-ctrl:14px;--ad-meta:12px;font-size:var(--ad-ctrl)}
+
+/* 刊头 */
+.head{display:flex;align-items:flex-end;gap:30px;flex-wrap:wrap;padding:8px 0 16px;border-bottom:1px solid var(--line)}
+.head h1{margin:0;font:var(--lab-w) 30px var(--display);letter-spacing:.08em}
+html[data-skin="B"] .head h1{font:500 38px var(--display);letter-spacing:.05em}
+.head .sub{font:italic 300 13px var(--body);color:var(--quiet);margin-left:4px}
+.head .spacer{flex:1}
+.head .pl{text-align:right}
+.head .pl .lab{font-size:var(--ad-meta);letter-spacing:.18em;color:var(--muted)}
+.head .pl .bignum{font-size:24px;margin-top:2px}
+html[data-skin="B"] .head .pl .bignum{font-size:30px}
+.head .pl .bignum.warn{color:var(--bad)}
+
+/* 分区 */
+.sect{padding:24px 0 8px;border-top:1px solid var(--line-dim)}
+/* 分节标题字号对齐总览页设备大字(.station .dv b,skin B 600 20px) */
+.sect h2{margin:0 0 16px;font:var(--lab-w) 16px var(--display);letter-spacing:.16em;color:var(--text);
+  text-transform:var(--lab-tt);display:flex;align-items:baseline;gap:13px}
+html[data-skin="B"] .sect h2{font-weight:600;font-size:20px;letter-spacing:.12em}
+.sect h2 .rn{color:var(--ac);font-size:16px;letter-spacing:.06em}
+.sect h2 .h-note{font:400 var(--ad-meta) var(--mono);color:var(--quiet);letter-spacing:.04em;margin-left:auto;text-transform:none}
+
+/* 条 */
+.bar{height:8px;background:var(--line-dim);position:relative;overflow:hidden}
+.bar.big{height:11px}
+.bar>i{position:absolute;inset:0 auto 0 0;background:var(--ac);transition:width .5s cubic-bezier(.2,.7,.3,1)}
+.bar.cool>i{background:var(--ac)}
+
+/* 键值行 */
+.kv{display:grid;grid-template-columns:1fr;gap:0;margin-top:14px}
+.kv .row{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;padding:10px 2px;border-bottom:1px solid var(--line-dim)}
+.kv .row .k{font:var(--lab-w) var(--ad-ctrl) var(--display);letter-spacing:.1em;color:var(--muted);text-transform:var(--lab-tt);white-space:nowrap}
+.kv .row .v{margin-left:auto;font:400 var(--ad-major) var(--mono);color:var(--text);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.kv .row .v .q{font-size:var(--ad-meta);color:var(--quiet);margin-left:6px}
+.kv .row .path{flex-basis:100%;font:400 11px var(--mono);color:var(--quiet);margin-top:-4px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl;text-align:left}
+
+.disk-cap,.cov-cap{margin-top:10px;font:400 var(--ad-ctrl) var(--mono);color:var(--muted);font-variant-numeric:tabular-nums}
+.disk-cap b,.cov-cap b{color:var(--text);font-weight:400}
+.disk-cap .warn{color:var(--bad)}
+
+/* 两列细分 */
+.split{display:grid;grid-template-columns:1fr 1fr;gap:18px 46px;margin-top:20px}
+@media (max-width:760px){.split{grid-template-columns:1fr}}
+.col-h{font:var(--lab-w) var(--ad-meta) var(--display);letter-spacing:.2em;color:var(--ac);
+  text-transform:var(--lab-tt);padding-bottom:8px;border-bottom:1px solid var(--ac-soft);margin-bottom:6px}
+.brow{display:flex;align-items:center;gap:12px;padding:8px 2px;border-bottom:1px solid var(--line-dim)}
+.brow .nm{font:var(--lab-w) var(--ad-ctrl) var(--display);letter-spacing:.08em;color:var(--text);min-width:5.2em}
+.brow .mini{flex:1;height:5px;background:var(--line-dim);position:relative;overflow:hidden;max-width:240px}
+.brow .mini>i{position:absolute;inset:0 auto 0 0;background:var(--ac)}
+.brow .ct{font:400 var(--ad-meta) var(--mono);color:var(--quiet);min-width:4.5em;text-align:right}
+.brow .by{font:400 var(--ad-ctrl) var(--mono);color:var(--muted);min-width:6.5em;text-align:right;font-variant-numeric:tabular-nums}
+
+/* 预览预热 */
+.pv-stats{display:flex;flex-wrap:wrap;gap:30px 44px;margin-top:14px}
+.pv-stats .st{display:flex;flex-direction:column;gap:3px}
+.pv-stats .st .n{font:400 26px var(--mono);color:var(--text);font-variant-numeric:tabular-nums;line-height:1}
+.pv-stats .st .n.ac{color:var(--ac)}
+.pv-stats .st .n.bad{color:var(--bad)}
+.pv-stats .st .l{font:var(--lab-w) var(--ad-meta) var(--display);letter-spacing:.16em;color:var(--muted);text-transform:var(--lab-tt)}
+.warm{display:flex;align-items:center;gap:18px;margin-top:22px;flex-wrap:wrap}
+.warm .dot{width:8px;height:8px;border-radius:50%;background:var(--quiet);flex:none}
+.warm.run .dot{background:var(--ac);animation:adPulse 1.3s ease-in-out infinite}
+.warm.off .dot{background:var(--quiet)}
+@keyframes adPulse{0%,100%{opacity:1;box-shadow:0 0 0 0 var(--ac-soft)}50%{opacity:.5;box-shadow:0 0 0 5px transparent}}
+.warm .ws{font:400 var(--ad-major) var(--body);color:var(--text)}
+.warm .ws .cur{font:400 var(--ad-meta) var(--mono);color:var(--quiet);margin-left:8px}
+.warm .spacer{flex:1}
+.warm-note{margin-top:12px;font:400 var(--ad-meta) var(--mono);color:var(--quiet);font-variant-numeric:tabular-nums}
+.warm-note .err{color:var(--bad)}
+
+/* 文件目录 */
+.dir{margin-top:6px;max-height:430px;overflow:auto;scrollbar-width:thin;padding-right:6px}
+.dir .dev{font:var(--lab-w) var(--ad-major) var(--display);letter-spacing:.12em;color:var(--ac);
+  padding:14px 2px 8px;border-bottom:1px solid var(--ac-soft);display:flex;align-items:baseline;gap:12px}
+html[data-skin="B"] .dir .dev{font:600 19px var(--display)}
+.dir .dev .ct{margin-left:auto;font:400 var(--ad-meta) var(--mono);color:var(--muted);letter-spacing:.02em}
+.dir .it{display:flex;align-items:center;gap:14px;padding:8px 2px 8px 16px;border-bottom:1px solid var(--line-dim)}
+.dir .it .tg{font:400 var(--ad-ctrl) var(--body);color:var(--text);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
+.dir .it .src{font:400 11px var(--mono);color:var(--quiet);margin-left:4px}
+.dir .it .cov{width:54px;height:4px;background:var(--line-dim);position:relative;overflow:hidden;flex:none}
+.dir .it .cov>i{position:absolute;inset:0 auto 0 0;background:var(--ac)}
+.dir .it .ct{font:400 var(--ad-meta) var(--mono);color:var(--quiet);min-width:4em;text-align:right}
+.dir .it .by{font:400 var(--ad-ctrl) var(--mono);color:var(--muted);min-width:6.5em;text-align:right;font-variant-numeric:tabular-nums}
+
+/* 入库历史直方图 */
+.hist{display:flex;align-items:flex-end;gap:3px;height:96px;margin:4px 0 6px;padding-top:6px}
+.hist .hb{flex:1;min-width:4px;background:var(--ac-soft);position:relative;transition:height .4s}
+.hist .hb:hover{background:var(--ac)}
+.hist .hb .tip{position:absolute;bottom:100%;left:50%;transform:translateX(-50%);margin-bottom:5px;
+  white-space:nowrap;font:400 11px var(--mono);color:var(--text);background:var(--sky-bg);padding:2px 6px;
+  border:1px solid var(--line);opacity:0;pointer-events:none;transition:opacity .15s;z-index:3}
+.hist .hb:hover .tip{opacity:1}
+.hist-axis{display:flex;justify-content:space-between;font:400 11px var(--mono);color:var(--quiet);margin-bottom:14px}
+
+.lrow{display:flex;align-items:baseline;gap:12px;padding:7px 2px;border-bottom:1px solid var(--line-dim)}
+.lrow .nm{font:400 var(--ad-ctrl) var(--body);color:var(--text);min-width:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lrow .meta{font:400 var(--ad-meta) var(--mono);color:var(--quiet);text-align:right;white-space:nowrap}
+
+.statusline{margin-top:auto;padding-top:18px}
+
+@media (prefers-reduced-motion:no-preference){
+  .seq{animation-play-state:paused}
+  body.ready .seq{animation-play-state:running}
+}
+</style>
+</head>
+<body>
+<canvas id="bg" aria-hidden="true"></canvas>
+
+<main class="wrap">
+  <header class="head seq">
+    <h1>素材库 · 维护<span class="sub">database &amp; preview maintenance</span></h1>
+    <span class="spacer"></span>
+    <div class="pl"><div class="lab">馆藏素材</div><div class="bignum" id="pl-total">--</div></div>
+    <div class="pl"><div class="lab">占用空间</div><div class="bignum" id="pl-bytes">--</div></div>
+    <div class="pl"><div class="lab">预览覆盖</div><div class="bignum" id="pl-cov">--</div></div>
+  </header>
+
+  <section class="sect seq d1" id="s-storage">
+    <h2><span class="rn">Ⅰ</span> 存储占用<span class="h-note" id="disk-root">--</span></h2>
+    <div class="bar big cool"><i id="disk-fill" style="width:0"></i></div>
+    <div class="disk-cap" id="disk-cap">读取磁盘…</div>
+    <div class="kv" id="storage-rows"></div>
+    <div class="split">
+      <div class="col"><div class="col-h">按设备</div><div id="by-device"></div></div>
+      <div class="col"><div class="col-h">按类型</div><div id="by-ext"></div></div>
+    </div>
+  </section>
+
+  <section class="sect seq d2" id="s-preview">
+    <h2><span class="rn">Ⅱ</span> 大图预览 · 空闲预热<span class="h-note" id="cov-note">--</span></h2>
+    <div class="bar big"><i id="cov-fill" style="width:0"></i></div>
+    <div class="cov-cap" id="cov-cap">--</div>
+    <div class="pv-stats" id="pv-stats"></div>
+    <div class="warm" id="warm">
+      <span class="dot"></span>
+      <span class="ws" id="warm-state">--</span>
+      <span class="spacer"></span>
+      <button class="con" id="warm-toggle" type="button">--</button>
+    </div>
+    <div class="warm-note" id="warm-note"></div>
+  </section>
+
+  <section class="sect seq d2" id="s-dir">
+    <h2><span class="rn">Ⅲ</span> 文件目录<span class="h-note" id="dir-note">--</span></h2>
+    <div class="dir" id="dir"></div>
+  </section>
+
+  <section class="sect seq d3" id="s-history">
+    <h2><span class="rn">Ⅳ</span> 入库历史<span class="h-note">近 30 日 · 按本地落盘日</span></h2>
+    <div class="hist-axis"><span id="hist-from">--</span><span id="hist-to">--</span></div>
+    <div class="hist" id="hist"></div>
+    <div class="split">
+      <div class="col"><div class="col-h">最近入库</div><div id="recent"></div></div>
+      <div class="col"><div class="col-h">备份运行</div><div id="backup-runs"></div></div>
+    </div>
+  </section>
+
+  <footer class="statusline seq d3">
+    <span class="kind" id="status-kind" style="color:var(--good)">[—]</span>
+    <span class="msg" id="status-text">连接素材库…</span>
+    <span class="ts" id="snapshot">--</span>
+  </footer>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+const OPS=window.OPS;
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const REDUCED=matchMedia("(prefers-reduced-motion: reduce)").matches;
+const esc=s=>String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+
+/* ── 背景星空(与素材库同源) ── */
+(function bg(){
+  const cv=$("bg"),ctx=cv.getContext("2d");
+  let stars=[];let s=7;const rnd=()=>{s^=s<<13;s^=s>>>17;s^=s<<5;return((s>>>0)/4294967296);};
+  function seed(){const n=Math.round(innerWidth*innerHeight/16000);
+    stars=Array.from({length:n},()=>({x:rnd(),y:rnd(),m:rnd(),ph:rnd()*6.28,sp:.4+rnd()}));}
+  seed();addEventListener("resize",seed);
+  (function draw(t){
+    const w=innerWidth,h=innerHeight,dpr=devicePixelRatio||1;
+    if(cv.width!==w*dpr||cv.height!==h*dpr){cv.width=w*dpr;cv.height=h*dpr;}
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.fillStyle=css("--sky-bg");ctx.fillRect(0,0,w,h);
+    ctx.fillStyle=css("--sky-star");
+    for(const st of stars){
+      const tw=REDUCED?1:(.7+.3*Math.sin(t/1000*st.sp+st.ph));
+      ctx.globalAlpha=(.08+st.m*.3)*tw;
+      ctx.beginPath();ctx.arc(st.x*w,st.y*h,st.m>.93?1.5:.8,0,7);ctx.fill();
+    }
+    ctx.globalAlpha=1;requestAnimationFrame(draw);
+  })(0);
+})();
+
+/* ── 数值格式 ── */
+function fmtBytes(n){
+  n=Number(n)||0;const u=["B","KB","MB","GB","TB","PB"];let i=0;
+  while(n>=1024&&i<u.length-1){n/=1024;i++;}
+  return n.toFixed(n>=100||i<=1?0:(n>=10?1:2))+" "+u[i];
+}
+function fmtInt(n){return (Number(n)||0).toLocaleString("en-US");}
+function fmtTime(v){return v?String(v).replace("T"," "):"--";}
+
+/* ── 渲染 ── */
+function renderStorage(d){
+  const disk=d.disk,lib=d.library||{},sto=d.storage||{};
+  $("disk-root").textContent=d.library_root_display||d.library_root||"";
+  if(disk){
+    const p=disk.percent!=null?disk.percent:(disk.total?disk.used/disk.total*100:0);
+    $("disk-fill").style.width=Math.min(100,p)+"%";
+    const warn=p>=95;
+    $("disk-cap").innerHTML=`归档盘  已用 <b>${fmtBytes(disk.used)}</b> · 剩 <b class="${disk.free<60*1073741824?"warn":""}">${fmtBytes(disk.free)}</b> · 共 <b>${fmtBytes(disk.total)}</b> <span class="${warn?"warn":""}">(${p.toFixed(1)}%)</span>`;
+  }else{$("disk-fill").style.width="0";$("disk-cap").textContent="归档盘不可达";}
+  const rows=[
+    ["库文件",fmtBytes(lib.total_bytes),`${fmtInt(lib.total)} 个文件`,""],
+    ["预览缓存",fmtBytes(sto.preview_dir_bytes),`${fmtInt((d.previews||{}).ready)} 张大图`,sto.preview_dir_display],
+    ["数据库",fmtBytes(sto.db_bytes),"materials.db",sto.db_path_display],
+  ];
+  $("storage-rows").innerHTML=rows.map(([k,v,q,path])=>
+    `<div class="row"><span class="k">${k}</span><span class="v">${v}<span class="q">${esc(q)}</span></span>${path?`<span class="path" title="${esc(path)}">${esc(path)}</span>`:""}</div>`).join("");
+  const maxDevB=Math.max(1,...(lib.by_device||[]).map(x=>x.bytes));
+  $("by-device").innerHTML=(lib.by_device||[]).map(x=>
+    `<div class="brow"><span class="nm">${esc(x.name)}</span><span class="mini"><i style="width:${x.bytes/maxDevB*100}%"></i></span><span class="ct">${fmtInt(x.count)} 张</span><span class="by">${fmtBytes(x.bytes)}</span></div>`).join("")||"<div class='lrow'><span class='nm'>—</span></div>";
+  const maxExtB=Math.max(1,...(lib.by_extension||[]).map(x=>x.bytes));
+  $("by-ext").innerHTML=(lib.by_extension||[]).map(x=>
+    `<div class="brow"><span class="nm">${esc(x.name||"—")}</span><span class="mini"><i style="width:${x.bytes/maxExtB*100}%"></i></span><span class="ct">${fmtInt(x.count)} 张</span><span class="by">${fmtBytes(x.bytes)}</span></div>`).join("")||"";
+}
+
+function renderPreview(d){
+  const pv=d.previews||{},w=d.warmer||{};
+  const cov=pv.coverage!=null?pv.coverage:0;
+  $("cov-fill").style.width=Math.min(100,cov)+"%";
+  $("cov-note").textContent=`RAW ${fmtInt(pv.raw_total)} 帧`;
+  $("cov-cap").innerHTML=`大图预览覆盖 <b>${cov.toFixed(1)}%</b> · 已就绪 <b>${fmtInt(pv.ready)}</b> / ${fmtInt(pv.raw_total)} · 待生成 <b>${fmtInt(pv.raw_missing)}</b>`;
+  $("pv-stats").innerHTML=[
+    ["就绪",pv.ready,"ac"],["待生成",pv.missing,""],["生成中",pv.building,pv.building?"ac":""],["失败",pv.failed,pv.failed?"bad":""],
+  ].map(([l,n,c])=>`<div class="st"><span class="n ${c}">${fmtInt(n)}</span><span class="l">${l}</span></div>`).join("");
+  /* 预热状态机 */
+  const box=$("warm");
+  let state,running=false;
+  if(!w.enabled){state="预热已暂停";}
+  else if(w.scanning){state="等待索引扫描完成";}
+  else if(w.active){state="正在生成预览";running=true;}
+  else if(!w.idle){state="等待空闲(用户正在看图)";}
+  else if((w.remaining||0)===0){state="全部预览已就绪";}
+  else{state="空闲待命 · 逐张预热中";running=true;}
+  box.className="warm"+(running?" run":(!w.enabled?" off":""));
+  const cur=running&&w.active&&w.current?`<span class="cur">#${esc(String(w.current).slice(0,12))}</span>`:"";
+  $("warm-state").innerHTML=esc(state)+cur;
+  const tog=$("warm-toggle");
+  tog.textContent=w.enabled?"暂停预热":"恢复预热";
+  tog.dataset.next=w.enabled?"0":"1";
+  const last=w.last_active_at?OPS.fmtAgo((Date.now()-new Date(w.last_active_at.replace(" ","T")).getTime())/1000):"—";
+  let note=`本次会话已生成 <b>${fmtInt(w.done)}</b> 张 · 待生成 ${fmtInt(w.remaining)} 张 · 最近活动 ${last}`;
+  if(w.failed)note+=` · <span class="err">失败 ${fmtInt(w.failed)}</span>`;
+  if(w.last_error)note+=` · <span class="err" title="${esc(w.last_error)}">最近错误</span>`;
+  $("warm-note").innerHTML=note.replace(/<b>/g,'<b style="color:var(--text);font-weight:400">');
+}
+
+function renderDirectory(d){
+  const dir=d.directory||[];
+  $("dir-note").textContent=`${fmtInt(dir.length)} 个文件夹`;
+  const byDev={};
+  dir.forEach(r=>{(byDev[r.device]=byDev[r.device]||[]).push(r);});
+  let html="";
+  Object.keys(byDev).forEach(dev=>{
+    const rows=byDev[dev];
+    const c=rows.reduce((a,b)=>a+b.count,0),b=rows.reduce((a,x)=>a+x.bytes,0);
+    html+=`<div class="dev">${esc(dev)}<span class="ct">${fmtInt(rows.length)} 文件夹 · ${fmtInt(c)} 张 · ${fmtBytes(b)}</span></div>`;
+    html+=rows.map(r=>
+      `<div class="it"><span class="tg">${esc(r.folder)}</span>`+
+      `<span class="ct">${fmtInt(r.count)} 张</span><span class="by">${fmtBytes(r.bytes)}</span></div>`).join("");
+  });
+  $("dir").innerHTML=html||"<div class='lrow'><span class='nm'>暂无目录</span></div>";
+}
+
+function renderHistory(d){
+  const ing=d.ingestion||{};
+  const days=(ing.by_date||[]).filter(x=>/^\d{4}-\d{2}-\d{2}$/.test(x.day)).slice().reverse();
+  const maxC=Math.max(1,...days.map(x=>x.count));
+  $("hist").innerHTML=days.map(x=>
+    `<div class="hb" style="height:${Math.max(3,x.count/maxC*100)}%"><span class="tip">${x.day} · ${fmtInt(x.count)} 张 · ${fmtBytes(x.bytes)}</span></div>`).join("")||"";
+  $("hist-from").textContent=days.length?days[0].day:"--";
+  $("hist-to").textContent=days.length?days[days.length-1].day:"--";
+  $("recent").innerHTML=(ing.recent||[]).slice(0,12).map(it=>{
+    const t=it.captured_at?String(it.captured_at).replace(/(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/,"$1-$2-$3 $4:$5"):(it.mtime_text||"");
+    return `<div class="lrow"><span class="nm" title="${esc(it.file_name||"")}">${esc(it.target||it.file_name||"—")}</span><span class="meta">${esc(it.device)} · ${esc(t)}</span></div>`;
+  }).join("")||"<div class='lrow'><span class='nm'>—</span></div>";
+  const runs=(ing.backup_runs||[]).filter(x=>/^\d{4}-\d{2}-\d{2}$/.test(x.date)).slice(0,10);
+  $("backup-runs").innerHTML=runs.map(r=>
+    `<div class="lrow"><span class="nm">${esc(r.date)}</span><span class="meta">${fmtInt(r.log_count)} 条日志 · ${fmtBytes(r.bytes)}</span></div>`).join("")||"<div class='lrow'><span class='nm'>暂无备份日志</span></div>";
+}
+
+let revealed=false;
+function render(d){
+  $("pl-total").textContent=fmtInt((d.library||{}).total);
+  $("pl-bytes").textContent=fmtBytes((d.library||{}).total_bytes);
+  const cov=(d.previews||{}).coverage;
+  const plc=$("pl-cov");plc.textContent=cov!=null?cov.toFixed(1)+"%":"--";
+  plc.classList.toggle("warn",cov!=null&&cov<10);
+  renderStorage(d);renderPreview(d);renderDirectory(d);renderHistory(d);
+  $("status-kind").textContent="[OK]";$("status-kind").style.color="var(--good)";
+  $("status-text").textContent="素材库维护视图 · 数据库 + 大图预热";
+  $("snapshot").textContent=fmtTime(d.generated_at);
+}
+
+async function load(){
+  try{
+    const d=await OPS.fetchJSON("/api/materials/admin");
+    render(d);
+  }catch(e){
+    $("status-kind").textContent="[ERR]";$("status-kind").style.color="var(--bad)";
+    $("status-text").textContent="维护数据加载失败:"+(e.message||"接口不可达");
+    $("snapshot").textContent="--";
+  }finally{
+    if(!revealed){revealed=true;requestAnimationFrame(()=>document.body.classList.add("ready"));}
+  }
+}
+
+/* 预热暂停/恢复 */
+$("warm-toggle").addEventListener("click",async()=>{
+  const tog=$("warm-toggle"),next=tog.dataset.next==="1";
+  tog.disabled=true;
+  try{
+    await fetch("/api/materials/warmer",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({enabled:next})});
+    await load();
+  }catch(e){/* 忽略,下一轮刷新自纠 */}
+  finally{tog.disabled=false;}
+});
+
+load();
+setInterval(()=>{if(!OPS.hidden||!OPS.hidden())load();},3000);
+OPS.onSkin&&OPS.onSkin(()=>{/* 配色切换无需重绘 canvas 数据 */});
+</script>
+</body>
+</html>

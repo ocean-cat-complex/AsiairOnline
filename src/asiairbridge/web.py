@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import json
 import os
 import subprocess
@@ -67,11 +68,14 @@ class AsiairBridgeServer(ThreadingHTTPServer):
 
     def server_close(self) -> None:
         self.camera_cache.stop()
+        if self._materials is not None:
+            self._materials.stop_warmer()
         super().server_close()
 
     def materials(self) -> MaterialLibrary:
         if self._materials is None:
             self._materials = MaterialLibrary(self.config)
+            self._materials.start_warmer()
         return self._materials
 
 
@@ -208,9 +212,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     self.server.config.root / "docs" / "ops-materials.html",
                     "text/html; charset=utf-8",
                 )
+            elif parsed.path in {"/materials-admin", "/library-admin"}:
+                self._send_file(
+                    self.server.config.root / "docs" / "ops-materials-admin.html",
+                    "text/html; charset=utf-8",
+                )
             elif parsed.path == "/mount":
                 self._send_file(
                     self.server.config.root / "docs" / "ops-mount.html",
+                    "text/html; charset=utf-8",
+                )
+            elif parsed.path == "/advanced":
+                self._send_file(
+                    self.server.config.root / "docs" / "ops-advanced.html",
                     "text/html; charset=utf-8",
                 )
             elif parsed.path == "/mount-classic":
@@ -351,9 +365,20 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send_file(
                     cached_raw_path(self.server.config, device),
                     "application/octet-stream",
+                    allow_gzip=True,
                 )
             elif parsed.path == "/api/materials/summary":
                 self._send_json(self.server.materials().summary())
+            elif parsed.path == "/api/materials/admin":
+                self._send_json(self.server.materials().admin_overview())
+            elif parsed.path == "/api/materials/activity":
+                lock = read_lock(self.server.config.project.lock_file)
+                downloading = bool(lock.get("active")) and lock.get("pid_alive") is not False
+                payload = self.server.materials().activity()
+                payload["ok"] = True
+                payload["downloading"] = downloading
+                payload["download_devices"] = list(lock.get("devices") or []) if downloading else []
+                self._send_json(payload)
             elif parsed.path == "/api/materials/browse":
                 query = parse_qs(parsed.query)
                 self._send_json(
@@ -468,6 +493,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 )
             elif parsed.path == "/api/materials/scan":
                 self._send_json(self.server.materials().start_scan(force=bool(payload.get("force"))))
+            elif parsed.path == "/api/materials/warmer":
+                self._send_json(self.server.materials().set_warmer_enabled(bool(payload.get("enabled"))))
             elif parsed.path == "/api/control-role":
                 device = str(payload.get("device") or "").strip()
                 session_id = str(payload.get("session_id") or "").strip()
@@ -684,16 +711,25 @@ class DashboardHandler(BaseHTTPRequestHandler):
         content_type: str,
         download_name: str | None = None,
         cache_seconds: int | None = None,
+        allow_gzip: bool = False,
     ) -> None:
         if not path.is_file():
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         body = path.read_bytes()
+        encoding: str | None = None
+        if allow_gzip and "gzip" in (self.headers.get("Accept-Encoding") or "").lower():
+            body = gzip.compress(body, 1)
+            encoding = "gzip"
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        if encoding:
+            self.send_header("Content-Encoding", encoding)
         if cache_seconds is not None:
             self.send_header("Cache-Control", f"public, max-age={cache_seconds}")
+        elif content_type.startswith(("text/html", "application/javascript")):
+            self.send_header("Cache-Control", "no-store")
         if download_name:
             self.send_header("Content-Disposition", f'attachment; filename="{download_name}"')
         self.end_headers()

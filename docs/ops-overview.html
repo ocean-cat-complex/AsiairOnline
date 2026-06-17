@@ -16,15 +16,16 @@
 /* 台站脉搏 */
 .pulse{grid-area:pulse;display:flex;align-items:flex-end;gap:46px;flex-wrap:wrap;
   padding:14px 0 20px;border-bottom:1px solid var(--line)}
-.pl .lab{font-size:11px}
+.pl .lab{font-size:14px}
 .pl .bignum{margin-top:4px;font-size:38px}
 html[data-skin="B"] .pl .bignum{font-size:44px}
-.pl .sub{font:400 11px var(--mono);color:var(--quiet);margin-top:2px}
+.pl .sub{font:400 14px var(--mono);color:var(--quiet);margin-top:2px}
 .pulse .title{margin-right:auto}
+.pulse .title{margin-bottom:26px}
 .pulse .title h1{margin:0;font:var(--lab-w) 26px var(--display);letter-spacing:.1em}
 html[data-skin="B"] .pulse .title h1{font:500 34px var(--display);letter-spacing:.06em}
 html[data-skin="C"] .pulse .title h1{font:300 28px var(--display);letter-spacing:.02em}
-.pulse .title .sub{font:italic 300 12px var(--body);color:var(--muted);margin-top:3px}
+.pulse .title .sub{font:italic 300 14px var(--body);color:var(--muted);margin-top:3px}
 html[data-skin="A"] .pulse .title .sub,html[data-skin="C"] .pulse .title .sub{font-style:normal}
 
 /* 舰队 */
@@ -34,17 +35,18 @@ html[data-skin="A"] .pulse .title .sub,html[data-skin="C"] .pulse .title .sub{fo
 .station:hover{border-top-color:var(--muted)}
 .station.sel{border-top-color:var(--ac)}
 .station .dv{display:flex;align-items:baseline;gap:10px}
-.station .dv b{font:var(--lab-w) 18px var(--display);letter-spacing:.12em}
+.station .dv b{font:var(--lab-w) 16px var(--display);letter-spacing:.12em}
 html[data-skin="B"] .station .dv b{font:600 20px var(--display)}
-.station .dv .ip{font:400 10.5px var(--mono);color:var(--quiet)}
-.station .cam{margin-top:2px;font:400 11.5px var(--mono);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.station .cam{margin-top:2px;font:400 16px var(--mono);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .station .strip{display:flex;align-items:center;gap:14px;margin-top:10px}
 .ring{width:58px;height:58px;flex:none}
 .station .kv{flex:1;min-width:0}
 .station .kv .hrow{padding:2.5px 0}
+.station .kv .hrow .k{white-space:nowrap}
+.station .kv .hrow .v{white-space:nowrap;overflow-wrap:normal}
 .station .bar{margin-top:9px;height:2px;background:var(--line-dim);position:relative}
 .station .bar i{position:absolute;left:0;top:0;bottom:0;background:var(--ac);transition:width .8s cubic-bezier(.2,.7,.3,1)}
-.station .bar span{position:absolute;right:0;top:-16px;font:400 10px var(--mono);color:var(--quiet)}
+.station .bar span{position:absolute;right:0;top:-18px;font:400 12px var(--mono);color:var(--quiet)}
 .station .sig{position:absolute;right:2px;top:12px}
 
 /* 右栏:选中设备 */
@@ -53,25 +55,17 @@ html[data-skin="B"] .station .dv b{font:600 20px var(--display)}
   background:linear-gradient(270deg,var(--scrim) 60%,var(--scrim0))}
 .rail::-webkit-scrollbar{display:none}
 html[data-skin="C"] .rail{border-left-color:var(--line)}
-.rail .devname{font:var(--lab-w) 13px var(--display);letter-spacing:.22em;color:var(--ac);text-transform:var(--lab-tt)}
+.rail .devname{font:var(--lab-w) 14px var(--display);letter-spacing:.22em;color:var(--ac);text-transform:var(--lab-tt)}
 .rail h2{margin:2px 0 12px;font:var(--lab-w) 20px var(--display);letter-spacing:.08em}
 html[data-skin="B"] .rail h2{font:500 24px var(--display)}
 .cat{padding:7px 0;border-bottom:1px solid var(--line-dim);cursor:pointer}
-.cat-head{display:flex;align-items:baseline;gap:9px}
-.cat-head .lampline{flex:none}
-.cat-head .nm{font:var(--lab-w) 12px var(--display);letter-spacing:.12em;color:var(--text);text-transform:var(--lab-tt)}
-.cat-head .ct{margin-left:auto;font:400 11px var(--mono);color:var(--quiet)}
-.cat-items{display:none;padding:6px 0 2px 16px}
-.cat.open .cat-items{display:block}
-.cat-items .hrow .k{letter-spacing:.04em;text-transform:none;font-family:var(--body)}
-.cat-items .hrow{padding:2.5px 0}
 
 /* 日志流 */
 .logs{grid-area:logs;padding:8px 0 12px;display:flex;flex-direction:column}
 .logs .lhead{display:flex;align-items:center;gap:12px;padding:8px 0;border-top:1px solid var(--line)}
-.logs .lhead b{font:var(--lab-w) 12px var(--display);letter-spacing:.24em;color:var(--ac);text-transform:var(--lab-tt)}
+.logs .lhead b{font:var(--lab-w) 14px var(--display);letter-spacing:.24em;color:var(--ac);text-transform:var(--lab-tt)}
 .loglines{height:170px;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end;-webkit-mask-image:linear-gradient(180deg,transparent,#000 28%);mask-image:linear-gradient(180deg,transparent,#000 28%);
-  font:12px/1.85 var(--mono);color:var(--muted)}
+  font:14px/1.85 var(--mono);color:var(--muted)}
 .loglines .ln{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .loglines .ln .t{color:var(--quiet)}
 .loglines .ln .tag{color:var(--good)}
@@ -87,6 +81,40 @@ html[data-skin="B"] .rail h2{font:500 24px var(--display)}
   .wrap{grid-template-columns:1fr;grid-template-areas:"pulse" "fleet" "rail" "logs" "foot"}
   .rail{position:static;max-height:none;border-left:0;border-top:1px solid var(--ac-soft);padding:16px 0 0;background:none}
 }
+
+/* 字号整治(总览页范围):20px 以下九档合并为 内容18 / 注记16 / 微注14 */
+body{font-size:14px}
+html[data-skin="B"] .hrow .k{font-size:14px}
+html[data-skin="B"] .hrow .v{font-size:16px}
+html[data-skin="B"] .hgroup h3{font-size:16px}
+html[data-skin="B"] .statusline{font-size:14px}
+html[data-skin="B"] .statusline .kind{font-size:14px}
+html[data-skin="B"] .con-note{font-size:14px}
+
+/* 入场编排修订:总览页的设备列/右栏/日志是异步填充的,若沿用主题层"加载即按时间轴淡入",
+   慢网时空的设备容器会落在静态的「站务日志」标题之后,浮现顺序就乱了。
+   做法:先把所有 .seq 暂停在隐藏起始态,等首次数据就绪(load 结束)再统一放行,
+   届时各段已填好内容,按 d1/d2/d3 自上而下依次浮现。reduce 用户不受影响(本块在 no-preference 内)。 */
+@media (prefers-reduced-motion:no-preference){
+  .seq{animation-play-state:paused}
+  body.ready .seq{animation-play-state:running}
+}
+
+/* 右栏:不再整块淡入,而是内容逐行依次浮现(一行一行)。
+   容器自身用一个近乎即时的 opacity 切换占住它在级联中的档位(.28s),
+   不做时长淡入 —— 否则父级 opacity 渐变会"罩住"子行,行级错峰就看不出来了。
+   行的浮现只在首次揭幕(.rail.reveal)期间生效,其后轮询刷新不重放(见脚本)。 */
+@media (prefers-reduced-motion:no-preference){
+  .rail{opacity:0}
+  body.ready .rail{animation:railFrameIn .01s linear .28s forwards}
+  @keyframes railFrameIn{to{opacity:1}}
+  body.ready .rail.reveal .hgroup h3,
+  body.ready .rail.reveal .hrow{
+    opacity:0;transform:translateY(6px);
+    animation:opsSeq .46s cubic-bezier(.2,.7,.3,1) both;
+    animation-delay:calc(.3s + var(--ri,0) * .07s);
+  }
+}
 </style>
 </head>
 <body>
@@ -95,8 +123,7 @@ html[data-skin="B"] .rail h2{font:500 24px var(--display)}
 <main class="wrap">
   <section class="pulse seq">
     <div class="title">
-      <h1>台站总览</h1>
-      <div class="sub" id="gen-at">读取台站状态…</div>
+      <h1>站点总览</h1>
     </div>
     <div class="pl"><div class="lab">设备在线</div><div class="bignum" id="n-online">--</div><div class="sub">/ <span id="n-total">-</span> 台</div></div>
     <div class="pl"><div class="lab">正在采集</div><div class="bignum" id="n-capturing">--</div><div class="sub" id="cap-sub">--</div></div>
@@ -106,15 +133,12 @@ html[data-skin="B"] .rail h2{font:500 24px var(--display)}
 
   <section class="fleet seq d1" id="fleet" aria-label="设备舰队"></section>
 
-  <aside class="rail seq d2" id="rail">
-    <div class="devname" id="rail-dev">--</div>
-    <h2>重点遥测</h2>
+  <aside class="rail" id="rail">
     <div id="rail-high"></div>
-    <div id="rail-cats" style="margin-top:14px"></div>
   </aside>
 
   <section class="logs seq d3">
-    <div class="lhead"><b>站务日志</b><span class="con-note" id="log-note">由各接口实时事件汇成 · 只读</span></div>
+    <div class="lhead"><b>站务日志</b></div>
     <div class="loglines" id="loglines"></div>
   </section>
 
@@ -128,7 +152,7 @@ html[data-skin="B"] .rail h2{font:500 24px var(--display)}
 <script>
 const $=id=>document.getElementById(id);
 const OPS=window.OPS;
-let fleetData=null, monitorData=null, selDev=null;
+let fleetData=null, monitorData=null, selDev=null, revealed=false;
 const ringRegistry=new Map();   // device -> {canvas, progress, shown}
 
 /* ── 背景星空:轻量漂移 + 闪烁 ── */
@@ -190,7 +214,7 @@ function drawRing(cv,progress,active){
     ctx.beginPath();ctx.arc(s/2,s/2,24,-Math.PI/2,-Math.PI/2+Math.PI*2*Math.min(1,progress));ctx.stroke();
   }
   ctx.fillStyle=active?css("--ac"):css("--quiet");
-  ctx.font=`600 11px ${css("--mono")}`;ctx.textAlign="center";ctx.textBaseline="middle";
+  ctx.font=`600 12px ${css("--mono")}`;ctx.textAlign="center";ctx.textBaseline="middle";
   ctx.fillText(progress!=null?Math.round(progress*100)+"%":"待机",s/2,s/2);
 }
 function animateRings(){
@@ -225,13 +249,16 @@ function renderFleet(){
   root.innerHTML="";ringRegistry.clear();
   for(const [name,d] of devices){
     const cam=d.camera||{},app=d.app||{},ctl=d.controls||{},exp=d.exposure||{};
-    const [stxt,scls]=stateText(app);
+    /* 离线判定统一走 OPS.deriveOnline(看 errors 里 get_app_state 心跳);别用字段有无——
+       camera_cache 会保留旧相机型号,盒子掉线后字段仍有值会误报"在线" */
+    const dOff=OPS.deriveOnline(d)===false;
+    const [stxt,scls]=dOff?["未连接","bad"]:stateText(app);
     const el=document.createElement("article");
-    el.className="station"+(name===selDev?" sel":"");
+    el.className="station"+(name===selDev?" sel":"")+(dOff?" off":"");
     el.innerHTML=`
-      <span class="sig lampline ${d.ok?(app.capture_working?"warn":"on"):"bad"}"><i></i></span>
-      <div class="dv"><b>${name}</b><span class="ip num">${(d.device&&d.device.ip)||""}</span></div>
-      <div class="cam">${cam.name||"相机未连接"}</div>
+      <span class="sig lampline ${dOff?"bad":(app.capture_working?"warn":"on")}"><i></i></span>
+      <div class="dv"><b>${name}</b></div>
+      <div class="cam">${dOff?"盒子未连接":(cam.name||"相机未连接")}</div>
       <div class="strip">
         <canvas class="ring" width="58" height="58" aria-label="采集进度"></canvas>
         <div class="kv">
@@ -259,7 +286,6 @@ function renderFleet(){
 /* ── 右栏 ── */
 function railRow(k,v,ac){return `<div class="hrow"><span class="k">${k}</span><span class="v ${ac?"ac":""}">${v==null||v===""?"--":v}</span></div>`;}
 function renderRail(){
-  $("rail-dev").textContent="设备 · "+(selDev||"--");
   const d=fleetData&&fleetData.devices&&fleetData.devices[selDev];
   const hi=monitorData&&monitorData.device&&monitorData.device.name===selDev?monitorData.highlights:null;
   let html="";
@@ -284,24 +310,8 @@ function renderRail(){
     html+=`</div>`;
   }
   $("rail-high").innerHTML=html||`<div class="con-note">该设备暂无快照</div>`;
-
-  /* 类目健康(rpc-monitor 仅覆盖其轮询设备) */
-  const cats=(monitorData&&monitorData.device&&monitorData.device.name===selDev)?(monitorData.categories||[]):[];
-  const root=$("rail-cats");root.innerHTML=cats.length?`<h3 class="lab" style="font-size:11px;margin:0 0 6px">接口分类 · ${selDev}</h3>`:"";
-  for(const c of cats){
-    const bad=(c.fail_count||0)>0;
-    const el=document.createElement("div");
-    el.className="cat";
-    el.innerHTML=`<div class="cat-head">
-        <span class="lampline ${bad?"bad":"on"}"><i></i></span>
-        <span class="nm">${c.label||c.id}</span>
-        <span class="ct num">${c.ok_count||0}/${c.total_count||0}${c.stale_count?` · 滞后 ${c.stale_count}`:""}</span>
-      </div>
-      <div class="cat-items">${(c.items||[]).slice(0,8).map(it=>
-        `<div class="hrow"><span class="k">${it.label||it.method}</span><span class="v ${it.ok?"":"dim"}">${(it.display_value??"--")}</span></div>`).join("")}</div>`;
-    el.addEventListener("click",()=>el.classList.toggle("open"));
-    root.appendChild(el);
-  }
+  /* 为逐行浮现标注顺序索引(仅在首次揭幕 .rail.reveal 期间被 CSS 使用) */
+  $("rail-high").querySelectorAll(".hgroup h3, .hrow").forEach((el,i)=>el.style.setProperty("--ri",i));
 }
 
 /* ── 台站脉搏 ── */
@@ -323,7 +333,6 @@ function renderPulse(){
     countUp($("n-storage"),hi.storage_free_mb/1024,v=>v.toFixed(1));
     $("storage-sub").textContent=`GB 余 / ${(hi.storage_total_mb/1024).toFixed(0)} GB · ${monitorData.device.name}`;
   }
-  $("gen-at").textContent=`快照 ${ (monitorData&&monitorData.generated_at)||(fleetData&&fleetData.snapshot_at)||"--" } · 只读监控`;
 }
 
 /* ── 日志流:由真实条目事件汇成 ── */
@@ -374,13 +383,24 @@ async function load(){
     if(mon.status==="fulfilled")monitorData=mon.value;
     if(!fleetData&&!monitorData)throw new Error("台站接口不可达");
     renderPulse();renderFleet();renderRail();
+    {const cs=fleetData&&fleetData.devices&&fleetData.devices[selDev];
+     if(cs)OPS.reportConn(OPS.deriveOnline(cs)!==false,{ip:cs.device&&cs.device.ip,name:(cs.device&&cs.device.name)||selDev});}
     if(!logTimer){buildLogQueue();startLog();}
     $("status-kind").textContent="[OK]";$("status-kind").style.color="var(--good)";
-    $("status-text").textContent=`台站在线 · 轮询 ${monitorData?monitorData.poll_interval_ms:"--"} ms · ${monitorData&&monitorData.safety?monitorData.safety.mode:""}`;
-    $("snapshot").textContent=(monitorData&&monitorData.generated_at)||"--";
+    $("status-text").textContent=`${monitorData&&monitorData.safety?monitorData.safety.mode:""}`;
+    $("snapshot").textContent="更新时间 "+((monitorData&&monitorData.generated_at)||"--");
   }catch(e){
     $("status-kind").textContent="[ERR]";$("status-kind").style.color="var(--bad)";
     $("status-text").textContent="台站数据加载失败:"+(e.message||"接口不可达");
+  }finally{
+    /* 首次加载结束(成功或失败)后统一放行入场动画,保证自上而下且内容已就位 */
+    if(!revealed){revealed=true;requestAnimationFrame(()=>{
+      document.body.classList.add("ready");
+      /* 右栏逐行浮现:仅首次揭幕加 .reveal,级联跑完即移除,避免轮询刷新重放 */
+      const rail=$("rail");rail.classList.add("reveal");
+      const n=rail.querySelectorAll(".hgroup h3, .hrow").length;
+      setTimeout(()=>rail.classList.remove("reveal"),300+n*70+800);
+    });}
   }
 }
 load();setInterval(load,5000);

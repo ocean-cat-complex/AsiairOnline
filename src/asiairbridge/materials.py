@@ -65,6 +65,20 @@ class MaterialLibrary:
         self._preview_lock_guard = threading.Lock()
         self._preview_locks: dict[str, threading.Lock] = {}
         self._preview_semaphore = threading.BoundedSemaphore(1)
+        self._warmer_enabled = True
+        self._warmer_stop = threading.Event()
+        self._warmer_thread: threading.Thread | None = None
+        self._last_user_preview_at = 0.0
+        self._warmer_idle_seconds = 20.0
+        self._warmer_state: dict[str, Any] = {
+            "active": False,
+            "current": None,
+            "done": 0,
+            "failed": 0,
+            "last_error": None,
+            "last_active_at": None,
+        }
+        self._dir_cache: tuple[str | None, list[dict[str, Any]]] | None = None
         self._scan_status: dict[str, Any] = {
             "running": False,
             "started_at": None,
@@ -141,7 +155,19 @@ class MaterialLibrary:
         status["library_root_display"] = self.config.display_path(self.root)
         status["preview_dir"] = str(self.preview_dir)
         status["preview_dir_display"] = self.config.display_path(self.preview_dir)
+        status["library_updated_at"] = self.library_updated_at()
         return status
+
+    def library_updated_at(self) -> str | None:
+        try:
+            with self._connect() as conn:
+                row = conn.execute("SELECT MAX(indexed_at) AS updated_at FROM materials").fetchone()
+        except sqlite3.Error:
+            return None
+        if row and row["updated_at"]:
+            return str(row["updated_at"])
+        finished = self._scan_status.get("finished_at")
+        return str(finished) if finished else None
 
     def start_scan(self, force: bool = False) -> dict[str, Any]:
         with self._lock:
@@ -351,17 +377,20 @@ class MaterialLibrary:
             )
 
     def _finish_scan(self, scanned: int, indexed: int, error: str | None) -> None:
+        finished_at = datetime.now().isoformat(timespec="seconds")
         with self._lock:
             self._scan_status.update(
                 {
                     "running": False,
-                    "finished_at": datetime.now().isoformat(timespec="seconds"),
+                    "finished_at": finished_at,
                     "scanned_files": scanned,
                     "indexed_items": indexed,
                     "current": "",
                     "error": error,
                 }
             )
+            if error is None:
+                self._dir_cache = None
 
     def list_materials(
         self,
@@ -390,6 +419,7 @@ class MaterialLibrary:
         clause = f"WHERE {' AND '.join(where)}" if where else ""
         offset = (page - 1) * page_size
         with self._connect() as conn:
+            library_updated_at = self.library_updated_at()
             total = int(conn.execute(f"SELECT COUNT(*) FROM materials {clause}", params).fetchone()[0])
             rows = conn.execute(
                 f"""
@@ -404,6 +434,7 @@ class MaterialLibrary:
         return {
             "ok": True,
             "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "library_updated_at": library_updated_at,
             "library_root": str(self.root),
             "library_root_display": self.config.display_path(self.root),
             "page": page,
@@ -435,6 +466,7 @@ class MaterialLibrary:
         pattern = str(q or "").strip().lower()
 
         with self._connect() as conn:
+            library_updated_at = self.library_updated_at()
             rows = conn.execute(
                 """
                 SELECT * FROM materials
@@ -494,6 +526,7 @@ class MaterialLibrary:
         return {
             "ok": True,
             "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "library_updated_at": library_updated_at,
             "library_root": str(self.root),
             "library_root_display": self.config.display_path(self.root),
             "device": device,
@@ -512,6 +545,7 @@ class MaterialLibrary:
 
     def summary(self) -> dict[str, Any]:
         with self._connect() as conn:
+            library_updated_at = self.library_updated_at()
             total = int(conn.execute("SELECT COUNT(*) FROM materials").fetchone()[0])
             preview_ready = int(
                 conn.execute("SELECT COUNT(*) FROM materials WHERE preview_status='ready'").fetchone()[0]
@@ -536,13 +570,15 @@ class MaterialLibrary:
                     """
                 )
             ]
-            latest = [
-                _row_to_item(row)
-                for row in conn.execute("SELECT * FROM materials ORDER BY mtime DESC LIMIT 12").fetchall()
-            ]
+            latest = []
+            for row in conn.execute("SELECT * FROM materials ORDER BY mtime DESC LIMIT 12").fetchall():
+                item = _row_to_item(row)
+                item["thumb_url"] = f"/api/materials/thumb?id={row['id']}" if self._thumbnail_path_for_row(row) else None
+                latest.append(item)
         return {
             "ok": True,
             "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "library_updated_at": library_updated_at,
             "library_root": str(self.root),
             "library_root_display": self.config.display_path(self.root),
             "db_path": str(self.db_path),
@@ -561,7 +597,9 @@ class MaterialLibrary:
             "scan": self.scan_status(),
         }
 
-    def ensure_preview(self, item_id: str, force: bool = False) -> dict[str, Any]:
+    def ensure_preview(self, item_id: str, force: bool = False, user: bool = True) -> dict[str, Any]:
+        if user:
+            self._last_user_preview_at = time.monotonic()
         item_id = str(item_id or "").strip()
         if not item_id:
             raise ValueError("id is required")
@@ -700,6 +738,275 @@ class MaterialLibrary:
         except ValueError:
             return None
         return candidate
+
+    def start_warmer(self) -> None:
+        if self._warmer_thread and self._warmer_thread.is_alive():
+            return
+        self._warmer_stop.clear()
+        self._warmer_thread = threading.Thread(
+            target=self._warmer_worker,
+            name="materials-preview-warmer",
+            daemon=True,
+        )
+        self._warmer_thread.start()
+
+    def stop_warmer(self) -> None:
+        self._warmer_stop.set()
+
+    def set_warmer_enabled(self, enabled: bool) -> dict[str, Any]:
+        self._warmer_enabled = bool(enabled)
+        return self.warmer_status()
+
+    def warmer_status(self) -> dict[str, Any]:
+        state = dict(self._warmer_state)
+        state["enabled"] = self._warmer_enabled
+        state["idle"] = (time.monotonic() - self._last_user_preview_at) >= self._warmer_idle_seconds
+        with self._lock:
+            state["scanning"] = bool(self._scan_status.get("running"))
+        return state
+
+    def activity(self) -> dict[str, Any]:
+        warm = self.warmer_status()
+        ph, exts = self._raw_ext_clause()
+        with self._connect() as conn:
+            building = int(conn.execute(
+                "SELECT COUNT(*) FROM materials WHERE preview_status='building'"
+            ).fetchone()[0])
+            ready = int(conn.execute(
+                "SELECT COUNT(*) FROM materials WHERE preview_status='ready'"
+            ).fetchone()[0])
+            raw_total = int(conn.execute(
+                f"SELECT COUNT(*) FROM materials WHERE LOWER(extension) IN ({ph})",
+                exts,
+            ).fetchone()[0])
+        return {
+            "generating": bool(warm.get("active")) or building > 0,
+            "warmer_active": bool(warm.get("active")),
+            "warmer_enabled": bool(warm.get("enabled")),
+            "warmer_current": warm.get("current") if warm.get("active") else None,
+            "building": building,
+            "scanning": bool(warm.get("scanning")),
+            "preview_ready": ready,
+            "preview_raw_total": raw_total,
+        }
+
+    def _warmer_worker(self) -> None:
+        if self._warmer_stop.wait(8.0):
+            return
+        while not self._warmer_stop.is_set():
+            try:
+                with self._lock:
+                    scanning = bool(self._scan_status.get("running"))
+                idle_for = time.monotonic() - self._last_user_preview_at
+                if not self._warmer_enabled or scanning or idle_for < self._warmer_idle_seconds:
+                    if self._warmer_stop.wait(5.0):
+                        break
+                    continue
+                item_id = self._next_warm_candidate()
+                if item_id is None:
+                    if self._warmer_stop.wait(20.0):
+                        break
+                    continue
+                self._warmer_state["active"] = True
+                self._warmer_state["current"] = item_id
+                self._warmer_state["last_active_at"] = datetime.now().isoformat(timespec="seconds")
+                try:
+                    self.ensure_preview(item_id, user=False)
+                    self._warmer_state["done"] += 1
+                except Exception as exc:  # noqa: BLE001
+                    self._warmer_state["failed"] += 1
+                    self._warmer_state["last_error"] = str(exc)[:300]
+                finally:
+                    self._warmer_state["active"] = False
+                    self._warmer_state["current"] = None
+                if self._warmer_stop.wait(1.5):
+                    break
+            except Exception:  # noqa: BLE001
+                if self._warmer_stop.wait(5.0):
+                    break
+
+    def _raw_ext_clause(self) -> tuple[str, list[str]]:
+        exts = sorted(RAW_EXTENSIONS)
+        return ",".join("?" * len(exts)), [e.lower() for e in exts]
+
+    def _next_warm_candidate(self) -> str | None:
+        ph, exts = self._raw_ext_clause()
+        with self._connect() as conn:
+            row = conn.execute(
+                f"""
+                SELECT id FROM materials
+                WHERE LOWER(extension) IN ({ph})
+                  AND COALESCE(NULLIF(preview_status,''),'missing') NOT IN ('ready','building','failed')
+                ORDER BY mtime DESC
+                LIMIT 1
+                """,
+                exts,
+            ).fetchone()
+        return str(row["id"]) if row else None
+
+    @staticmethod
+    def _dir_size(path: Path) -> int:
+        total = 0
+        try:
+            for root, _dirs, files in os.walk(path):
+                for name in files:
+                    try:
+                        total += (Path(root) / name).stat().st_size
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+        return total
+
+    def _backup_runs(self, limit: int = 14) -> list[dict[str, Any]]:
+        runs: list[dict[str, Any]] = []
+        try:
+            logs_root = self.config.logs_path()
+        except Exception:  # noqa: BLE001
+            return runs
+        if not logs_root.is_dir():
+            return runs
+        try:
+            days = sorted(
+                (
+                    p for p in logs_root.iterdir()
+                    if p.is_dir() and re.fullmatch(r"\d{4}-\d{2}-\d{2}", p.name)
+                ),
+                key=lambda p: p.name,
+                reverse=True,
+            )[:limit]
+        except OSError:
+            return runs
+        for day in days:
+            try:
+                logs = [f for f in day.iterdir() if f.is_file() and f.suffix == ".log"]
+            except OSError:
+                logs = []
+            runs.append({
+                "date": day.name,
+                "log_count": len(logs),
+                "bytes": sum((f.stat().st_size for f in logs if f.is_file()), 0),
+            })
+        return runs
+
+    def _directory_tree(self) -> list[dict[str, Any]]:
+        updated = self.library_updated_at()
+        cache = self._dir_cache
+        if cache is not None and cache[0] == updated:
+            return cache[1]
+        agg: dict[tuple[str, str, str], list[int]] = {}
+        with self._connect() as conn:
+            for dev, src, rel, sz in conn.execute(
+                "SELECT device, source_label, relative_path, size_bytes FROM materials"
+            ):
+                parts = str(rel or "").replace("\\", "/").split("/")
+                folder = "/".join(parts[2:-1]) if len(parts) > 3 else "(根目录)"
+                entry = agg.setdefault((str(dev), str(src), folder), [0, 0])
+                entry[0] += 1
+                entry[1] += int(sz or 0)
+        rows = [
+            {"device": d, "source": s, "folder": f, "count": c, "bytes": b}
+            for (d, s, f), (c, b) in agg.items()
+        ]
+        rows.sort(key=lambda r: (r["device"], r["source"], -r["bytes"], r["folder"]))
+        self._dir_cache = (updated, rows)
+        return rows
+
+    def admin_overview(self) -> dict[str, Any]:
+        import shutil
+
+        ph, exts = self._raw_ext_clause()
+        disk: dict[str, Any] | None = None
+        try:
+            if self.root.exists():
+                du = shutil.disk_usage(self.root)
+                disk = {
+                    "total": du.total,
+                    "used": du.used,
+                    "free": du.free,
+                    "percent": round(du.used / du.total * 100, 1) if du.total else None,
+                }
+        except OSError:
+            disk = None
+        with self._connect() as conn:
+            library_updated_at = self.library_updated_at()
+            total = int(conn.execute("SELECT COUNT(*) FROM materials").fetchone()[0])
+            total_bytes = int(conn.execute("SELECT COALESCE(SUM(size_bytes),0) FROM materials").fetchone()[0])
+            status_rows = conn.execute(
+                "SELECT COALESCE(NULLIF(preview_status,''),'missing') AS s, COUNT(*) AS c FROM materials GROUP BY s"
+            ).fetchall()
+            preview_counts = {str(r["s"]): int(r["c"]) for r in status_rows}
+            preview_bytes = int(conn.execute(
+                "SELECT COALESCE(SUM(preview_bytes),0) FROM materials WHERE preview_status='ready'"
+            ).fetchone()[0])
+            raw_total = int(conn.execute(
+                f"SELECT COUNT(*) FROM materials WHERE LOWER(extension) IN ({ph})",
+                exts,
+            ).fetchone()[0])
+            raw_missing = int(conn.execute(
+                f"SELECT COUNT(*) FROM materials WHERE LOWER(extension) IN ({ph}) "
+                f"AND COALESCE(NULLIF(preview_status,''),'missing')='missing'",
+                exts,
+            ).fetchone()[0])
+            by_device = [dict(r) for r in conn.execute(
+                "SELECT device AS name, COUNT(*) AS count, COALESCE(SUM(size_bytes),0) AS bytes "
+                "FROM materials GROUP BY device ORDER BY bytes DESC"
+            ).fetchall()]
+            by_ext = [dict(r) for r in conn.execute(
+                "SELECT LOWER(extension) AS name, COUNT(*) AS count, COALESCE(SUM(size_bytes),0) AS bytes "
+                "FROM materials GROUP BY LOWER(extension) ORDER BY bytes DESC"
+            ).fetchall()]
+            by_date = [dict(r) for r in conn.execute(
+                "SELECT substr(COALESCE(NULLIF(mtime_text,''),'?'),1,10) AS day, COUNT(*) AS count, "
+                "COALESCE(SUM(size_bytes),0) AS bytes FROM materials GROUP BY day ORDER BY day DESC LIMIT 30"
+            ).fetchall()]
+            recent = []
+            for row in conn.execute("SELECT * FROM materials ORDER BY mtime DESC LIMIT 14").fetchall():
+                item = _row_to_item(row)
+                item["thumb_url"] = f"/api/materials/thumb?id={row['id']}" if self._thumbnail_path_for_row(row) else None
+                recent.append(item)
+        db_bytes = self.db_path.stat().st_size if self.db_path.is_file() else 0
+        preview_dir_bytes = self._dir_size(self.preview_dir)
+        directory = self._directory_tree()
+        return {
+            "ok": True,
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "library_root": str(self.root),
+            "library_root_display": self.config.display_path(self.root),
+            "library_updated_at": library_updated_at,
+            "disk": disk,
+            "library": {
+                "total": total,
+                "total_bytes": total_bytes,
+                "by_device": by_device,
+                "by_extension": by_ext,
+            },
+            "storage": {
+                "db_bytes": db_bytes,
+                "db_path_display": self.config.display_path(self.db_path),
+                "preview_dir_bytes": preview_dir_bytes,
+                "preview_dir_display": self.config.display_path(self.preview_dir),
+                "preview_total_bytes": preview_bytes,
+            },
+            "previews": {
+                "counts": preview_counts,
+                "ready": preview_counts.get("ready", 0),
+                "missing": preview_counts.get("missing", 0),
+                "building": preview_counts.get("building", 0),
+                "failed": preview_counts.get("failed", 0),
+                "raw_total": raw_total,
+                "raw_missing": raw_missing,
+                "coverage": round((raw_total - raw_missing) / raw_total * 100, 1) if raw_total else None,
+            },
+            "warmer": {**self.warmer_status(), "remaining": raw_missing},
+            "ingestion": {
+                "by_date": by_date,
+                "recent": recent,
+                "backup_runs": self._backup_runs(),
+            },
+            "directory": directory,
+            "scan": self.scan_status(),
+        }
 
 
 def generate_stf_preview(source_path: Path, output_path: Path) -> dict[str, Any]:

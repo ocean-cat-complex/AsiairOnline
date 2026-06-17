@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ASIAIR OPS · 高级</title>
+<script src="ops-theme.js"></script>
+<style>
+/* ── 页面骨架:全屏星空背景 + 内容 ── */
+#bg{position:fixed;inset:0;width:100vw;height:100vh;z-index:0}
+.wrap{position:relative;z-index:2;min-height:100vh;display:flex;flex-direction:column;
+  padding:78px 26px 14px;max-width:1500px;margin:0 auto}
+.wrap{--adv-major:16px;--adv-control:14px;--adv-meta:12px;font-size:var(--adv-control)}
+
+/* 标题与脉搏 */
+.pulse{display:flex;align-items:flex-end;gap:46px;flex-wrap:wrap;
+  padding:14px 0 20px;border-bottom:1px solid var(--line)}
+.pulse .title{margin-right:auto;margin-bottom:26px}
+.pulse .title h1{margin:0;font:500 34px var(--display);letter-spacing:.06em}
+.pl .lab{font-size:var(--adv-control);letter-spacing:.16em}
+.pl .bignum{margin-top:4px;font-size:44px}
+.pl .sub{font:400 var(--adv-control) var(--mono);color:var(--quiet);margin-top:2px}
+
+/* 盒子离线提示(不盖诊断内容,只点明下列接口失败的原因) */
+.adv-offline{display:none;align-items:baseline;gap:11px;padding:11px 0;border-bottom:1px solid var(--line);
+  font:var(--lab-w) var(--adv-major) var(--display);letter-spacing:.1em;color:var(--bad)}
+.adv-offline.show{display:flex}
+.adv-offline i{align-self:center;width:7px;height:7px;background:var(--bad);transform:rotate(45deg);animation:opsConnBlink 2.2s ease-in-out infinite}
+.adv-offline .ex{font:400 var(--adv-control) var(--body);color:var(--muted);letter-spacing:.02em}
+
+/* 异常摘要 */
+.issues{display:none;padding:12px 0 10px;border-bottom:1px solid var(--line)}
+.issues.show{display:block}
+.issue-head{display:flex;align-items:baseline;gap:12px;margin-bottom:8px}
+.issue-head b{font:var(--lab-w) var(--adv-major) var(--display);letter-spacing:.14em;color:var(--ac);text-transform:var(--lab-tt)}
+.issue-head span{font:400 var(--adv-control) var(--body);color:var(--muted)}
+.issue-list{display:flex;flex-wrap:wrap;gap:8px 18px}
+.issue{display:inline-flex;align-items:baseline;gap:8px;padding:2px 0 2px 10px;border:0;border-left:2px solid var(--ac);
+  background:transparent;color:inherit;cursor:pointer;text-align:left}
+.issue .src{font:var(--lab-w) var(--adv-control) var(--display);letter-spacing:.08em;color:var(--text)}
+.issue .detail{font:400 var(--adv-control) var(--body);color:var(--ac)}
+.issue:hover .src{color:var(--ac)}
+
+/* 接口分类瀑布流 */
+.cats{flex:1;display:block;columns:3 350px;column-gap:46px;padding:18px 0}
+.cat{display:inline-block;width:100%;border-top:1px solid var(--line);padding:10px 2px 14px;margin:0 0 18px;
+  break-inside:avoid;page-break-inside:avoid;vertical-align:top}
+.cat.has-issues{border-top-color:var(--ac-soft)}
+.cat.has-issues .lampline.bad i{background:var(--ac)}
+.cat-head{display:flex;align-items:baseline;gap:9px;cursor:pointer}
+.cat-head .nm{font:var(--lab-w) var(--adv-major) var(--display);letter-spacing:.12em;color:var(--text);text-transform:var(--lab-tt)}
+.cat-head .ct{margin-left:auto;font:400 var(--adv-major) var(--mono);color:var(--text)}
+.cat-head .ct-stale{font:400 var(--adv-meta) var(--mono);color:var(--quiet)}
+.cat-head .ct-issue{font:400 var(--adv-meta) var(--mono);color:var(--ac)}
+.cat-head .fold{font:400 var(--adv-control) var(--mono);color:var(--quiet);min-width:12px;text-align:right}
+.cat-items{display:none;padding:8px 0 0 16px}
+.cat.open .cat-items{display:block}
+.cat-items .hrow{padding:3px 0}
+.cat-items .hrow .k{letter-spacing:.04em;text-transform:none;font-family:var(--body);font-size:var(--adv-control);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:58%}
+.cat-items .hrow .v{font-size:var(--adv-major)}
+.cat-items .hrow .v.bad{color:var(--ac)}
+
+@media (max-width:1000px){.wrap{padding-top:96px}}
+
+/* 页面字号规则:内容16 / 注记14 / 微注12(与总览一致) */
+.wrap .hrow .k{font-size:var(--adv-control)}
+.wrap .hrow .v{font-size:var(--adv-major)}
+.wrap .statusline{font-size:var(--adv-control)}
+.wrap .statusline .kind{font-size:var(--adv-control)}
+.wrap .statusline .ts{font-size:var(--adv-control)}
+.wrap .con-note{font-size:var(--adv-control)}
+html[data-skin="B"] .wrap .hrow .k{font-size:var(--adv-control)}
+html[data-skin="B"] .wrap .hrow .v{font-size:var(--adv-major)}
+html[data-skin="B"] .wrap .statusline{font-size:var(--adv-control)}
+html[data-skin="B"] .wrap .statusline .kind{font-size:var(--adv-control)}
+html[data-skin="B"] .wrap .con-note{font-size:var(--adv-control)}
+
+/* 入场编排修订:本页脉搏数字 / 异常摘要 / 接口分类都是异步填充的,若沿用主题层"加载即按时间轴淡入",
+   慢网时空的容器会先于内容浮现,届时静态档位与异步内容错位,浮现顺序就乱了。
+   做法:先把所有 .seq 暂停在隐藏起始态,等首次数据就绪(load 结束)再统一放行,
+   届时各段已填好内容,按 d1/d2/d3 自上而下依次浮现。reduce 用户不受影响(本块在 no-preference 内)。 */
+@media (prefers-reduced-motion:no-preference){
+  .seq{animation-play-state:paused}
+  body.ready .seq{animation-play-state:running}
+}
+
+/* 接口分类瀑布流:不再整块淡入,而是各分类卡逐个依次浮现。
+   容器自身用一个近乎即时的 opacity 切换占住它在级联中的档位(.28s),
+   不做时长淡入 —— 否则父级 opacity 渐变会"罩住"子卡,卡级错峰就看不出来了。
+   卡片的浮现只在首次揭幕(.cats.reveal)期间生效,其后轮询刷新不重放(见脚本)。 */
+@media (prefers-reduced-motion:no-preference){
+  .cats{opacity:0}
+  body.ready .cats{animation:catsFrameIn .01s linear .28s forwards}
+  @keyframes catsFrameIn{to{opacity:1}}
+  body.ready .cats.reveal .cat{
+    opacity:0;transform:translateY(6px);
+    animation:opsSeq .46s cubic-bezier(.2,.7,.3,1) both;
+    animation-delay:calc(.3s + var(--ci,0) * .07s);
+  }
+}
+</style>
+</head>
+<body>
+<canvas id="bg" aria-hidden="true"></canvas>
+
+<main class="wrap">
+  <section class="pulse seq d1">
+    <div class="title">
+      <h1>高级</h1>
+    </div>
+    <div class="pl"><div class="lab">接口正常</div><div class="bignum" id="n-ok">--</div><div class="sub">/ <span id="n-total">-</span> 接口</div></div>
+    <div class="pl"><div class="lab">滞后</div><div class="bignum" id="n-stale">--</div><div class="sub">超过轮询间隔</div></div>
+    <div class="pl"><div class="lab">失败</div><div class="bignum" id="n-fail">--</div><div class="sub" id="fail-sub">连续失败计数</div></div>
+  </section>
+
+  <div class="adv-offline" id="adv-offline"><i></i><span id="adv-offline-msg">盒子未连接</span><span class="ex">下列接口失败为重试中,属预期</span></div>
+
+  <section class="issues seq d2" id="issues" aria-label="接口异常摘要"></section>
+
+  <section class="cats seq d3" id="cats" aria-label="接口分类明细"></section>
+
+  <footer class="statusline seq d3">
+    <span class="kind" id="status-kind" style="color:var(--good)">[—]</span>
+    <span class="msg" id="status-text">连接台站…</span>
+    <span class="ts" id="snapshot">--</span>
+  </footer>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+
+/* ── 背景星空:轻量漂移 + 闪烁(与总览同款) ── */
+(function bg(){
+  const cv=$("bg"),ctx=cv.getContext("2d");
+  const REDUCED=matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let stars=[];
+  function seed(){
+    const n=Math.round(innerWidth*innerHeight/9000);
+    let s=42;const rnd=()=>{s^=s<<13;s^=s>>>17;s^=s<<5;return((s>>>0)/4294967296);};
+    stars=Array.from({length:n},()=>({x:rnd(),y:rnd(),m:rnd(),ph:rnd()*6.28,sp:.4+rnd()}));
+  }
+  seed();addEventListener("resize",seed);
+  function cssVar(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim();}
+  function draw(t){
+    const w=innerWidth,h=innerHeight,dpr=devicePixelRatio||1;
+    if(cv.width!==w*dpr||cv.height!==h*dpr){cv.width=w*dpr;cv.height=h*dpr;}
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.fillStyle=cssVar("--sky-bg");ctx.fillRect(0,0,w,h);
+    ctx.fillStyle=cssVar("--sky-star");
+    const drift=REDUCED?0:(t/1000)*0.0016;
+    for(const st of stars){
+      const x=((st.x+drift*st.sp)%1)*w, y=st.y*h;
+      const tw=REDUCED?1:(.7+.3*Math.sin(t/1000*st.sp+st.ph));
+      ctx.globalAlpha=(.12+st.m*.4)*tw;
+      ctx.beginPath();ctx.arc(x,y,st.m>.93?1.6:st.m>.7?1.1:.7,0,7);ctx.fill();
+    }
+    ctx.globalAlpha=1;
+    requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(draw);
+})();
+
+/* ── 渲染 ── */
+let monitorData=null, revealed=false;
+const openState={};   /* 记忆用户的展开/收起选择,跨轮询保持 */
+const KEY_CATS=new Set(["app","system","camera","filter_wheel"]);
+
+function countUp(el,target,fmt){
+  const from=parseFloat(el.dataset.cur||"0")||0;
+  const to=+target||0;
+  el.dataset.cur=to;
+  if(matchMedia("(prefers-reduced-motion: reduce)").matches){el.textContent=fmt(to);return;}
+  const t0=performance.now(),dur=520;
+  (function step(t){
+    const p=Math.min(1,(t-t0)/dur),e=1-Math.pow(1-p,3);
+    el.textContent=fmt(from+(to-from)*e);
+    if(p<1)requestAnimationFrame(step);
+  })(t0);
+}
+
+function itemTitle(it){
+  const parts=[it.method];
+  if(it.interval_seconds!=null)parts.push(`间隔 ${it.interval_seconds}s`);
+  if(it.seconds!=null)parts.push(`耗时 ${it.seconds}s`);
+  if(it.age_seconds!=null)parts.push(`数据龄 ${Math.round(it.age_seconds)}s`);
+  if(it.updated_at)parts.push(`更新 ${it.updated_at}`);
+  return parts.join(" · ");
+}
+function issueItems(c){
+  return (c.items||[]).filter(it=>!it.ok);
+}
+function issueLabel(it){
+  return it.display_detail||it.error||it.display_value||"失败";
+}
+function openCategory(id){
+  openState[id]=true;
+  const el=[...document.querySelectorAll(".cat")].find(x=>x.dataset.catId===id);
+  if(!el)return;
+  el.classList.add("open");
+  const fold=el.querySelector(".fold");if(fold)fold.textContent="−";
+  el.scrollIntoView({block:"center",behavior:"smooth"});
+}
+function renderIssues(issues){
+  const root=$("issues");
+  if(!issues.length){root.className="issues seq d2";root.innerHTML="";return;}
+  const cats=[...new Set(issues.map(x=>x.catLabel))];
+  root.className="issues seq d2 show";
+  root.innerHTML=`<div class="issue-head"><b>异常摘要</b><span class="num">${issues.length} 项 · ${cats.length} 个分组</span></div>
+    <div class="issue-list">${issues.map(x=>`<button class="issue" type="button" data-cat="${esc(x.catId)}">
+      <span class="src">${esc(x.catLabel)}</span><span class="detail">${esc(x.itemLabel)} · ${esc(x.detail)}</span>
+    </button>`).join("")}</div>`;
+  root.querySelectorAll(".issue").forEach(btn=>
+    btn.addEventListener("click",()=>openCategory(btn.dataset.cat)));
+}
+
+function renderCats(){
+  const cats=(monitorData&&monitorData.categories)||[];
+  const root=$("cats");root.innerHTML="";
+  let ok=0,total=0,stale=0,fail=0;
+  const issues=[];
+  for(const c of cats){
+    const id=c.id||c.label;
+    const itemIssues=issueItems(c);
+    itemIssues.forEach(it=>issues.push({
+      catId:id,
+      catLabel:c.label||c.id,
+      itemLabel:it.label||it.method,
+      detail:issueLabel(it)
+    }));
+    ok+=c.ok_count||0;total+=c.total_count||0;stale+=c.stale_count||0;fail+=itemIssues.length;
+    const bad=itemIssues.length>0;
+    if(!(id in openState))openState[id]=bad||KEY_CATS.has(id);
+    const el=document.createElement("div");
+    el.className="cat"+(openState[id]?" open":"")+(bad?" has-issues":"");
+    el.dataset.catId=id;
+    el.innerHTML=`<div class="cat-head">
+        <span class="lampline ${bad?"bad":"on"}"><i></i></span>
+        <span class="nm">${esc(c.label||c.id)}</span>
+        <span class="ct num">${c.ok_count||0}/${c.total_count||0}</span>${bad?`<span class="ct-issue num">${itemIssues.length} 异常</span>`:""}${bad&&c.stale_count?`<span class="ct-stale num"> · 滞后 ${c.stale_count}</span>`:""}
+        <span class="fold" aria-hidden="true">${openState[id]?"−":"+"}</span>
+      </div>
+      <div class="cat-items">${(c.items||[]).map(it=>
+        `<div class="hrow" title="${esc(itemTitle(it))}"><span class="k">${esc(it.label||it.method)}</span><span class="v ${it.ok?(it.stale?"dim":""):"bad"}">${esc(it.ok?(it.display_value??"--"):(it.display_detail||"失败"))}</span></div>`).join("")}</div>`;
+    el.querySelector(".cat-head").addEventListener("click",()=>{
+      openState[id]=!openState[id];el.classList.toggle("open",openState[id]);
+      const fold=el.querySelector(".fold");if(fold)fold.textContent=openState[id]?"−":"+";
+    });
+    root.appendChild(el);
+  }
+  /* 为逐卡浮现标注顺序索引(仅在首次揭幕 .cats.reveal 期间被 CSS 使用) */
+  root.querySelectorAll(".cat").forEach((el,i)=>el.style.setProperty("--ci",i));
+  renderIssues(issues);
+  countUp($("n-ok"),total?ok:0,v=>total?Math.round(v):"--");$("n-total").textContent=total||"-";
+  countUp($("n-stale"),total?stale:0,v=>total?Math.round(v):"--");
+  countUp($("n-fail"),total?fail:0,v=>total?Math.round(v):"--");
+  $("fail-sub").textContent="接口异常项";
+}
+
+async function load(){
+  if(OPS.hidden())return;
+  try{
+    monitorData=await OPS.fetchJSON("/api/rpc-monitor?device="+encodeURIComponent(OPS.device||""));
+    renderCats();
+    $("status-kind").textContent="[OK]";$("status-kind").style.color="var(--good)";
+    $("status-text").textContent=`接口监测在线 · 轮询 ${monitorData.poll_interval_ms??"--"} ms`+((OPS.conn&&OPS.conn.online===false)?" · 盒子未连接":"");
+    $("snapshot").textContent=monitorData.generated_at||"--";
+  }catch(e){
+    $("status-kind").textContent="[ERR]";$("status-kind").style.color="var(--bad)";
+    $("status-text").textContent="接口数据加载失败:"+(e.message||"接口不可达");
+  }finally{
+    /* 首次加载结束(成功或失败)后统一放行入场动画,保证自上而下且内容已就位 */
+    if(!revealed){revealed=true;requestAnimationFrame(()=>{
+      document.body.classList.add("ready");
+      /* 接口分类逐卡浮现:仅首次揭幕加 .reveal,级联跑完即移除,避免轮询刷新重放 */
+      const cats=$("cats");cats.classList.add("reveal");
+      const n=cats.querySelectorAll(".cat").length;
+      setTimeout(()=>cats.classList.remove("reveal"),300+n*70+800);
+    });}
+  }
+}
+/* 顶栏连通性灯由 theme.js 探测点亮;本页据此点明"失败=盒子离线",但不盖诊断内容 */
+OPS.onConn(c=>{
+  const off=c&&c.online===false;
+  $("adv-offline").classList.toggle("show",!!off);
+  if(off)$("adv-offline-msg").textContent="盒子未连接"+(c.ip?(" · "+c.ip):"");
+});
+load();setInterval(load,5000);
+</script>
+</body>
+</html>
